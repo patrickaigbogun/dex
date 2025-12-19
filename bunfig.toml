@@ -1,0 +1,6 @@
+[run]
+# Ignore the Next.js build and cache folders
+ignore = [".next/", "node_modules/", "public/"]
+
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

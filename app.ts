@@ -1,20 +1,22 @@
+//app.ts
 import { Elysia } from 'elysia';
+import { staticPlugin } from '@elysiajs/static';
 import { apiRouter } from './routes';
-import next from 'next';
+import { Logestic } from 'logestic';
+import { createNextHandler } from './lib/next-adapter';
 
 const dev = process.env.NODE_ENV !== 'production';
-const ui = next({dev});
-const handle = ui.getRequestHandler();
 
-await ui.prepare();
+const app = new Elysia()
+  .use(Logestic.preset('fancy')) 
+  	.use(await staticPlugin({
+      assets: 'web/pages',
+      prefix: '/',
+    })) 
 
-const server = new Elysia()
     .use(apiRouter) 
     
-    .all("*", ({request}) => {
-	return handle(request, response);
-    })
-
-
     .listen(7990);
-console.log('Server running...');
+console.log(
+	`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
+)

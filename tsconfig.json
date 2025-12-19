@@ -91,6 +91,11 @@
       "dom.iterable",
       "esnext"
     ],
+    "baseUrl": ".", 
+	"paths": { 
+	  "@web/*": ["web/*"],
+    "@components/*": ["web/components/*"]
+	} ,
     "allowJs": true,
     "noEmit": true,
     "incremental": true,
