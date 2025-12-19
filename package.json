@@ -3,10 +3,21 @@
   "version": "1.0.50",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun --watch app.ts",
+    "hot": "bun --hot app.ts"
   },
   "dependencies": {
-    "elysia": "latest"
+    "@gray-adeyi/paystack-sdk": "^0.2.4",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/react": "^19.2.7",
+    "elysia": "latest",
+    "next": "^16.1.0",
+    "postcss": "^8.5.6",
+    "pouchdb": "^9.0.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
     "bun-types": "latest"
