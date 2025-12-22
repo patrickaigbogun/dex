@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { createRoot } from 'react-dom/client'
 
-import '@web/styles/index.css'
+export const metadata = {
+	title: 'Home',
+}
 
-function App() {
+export default function Page() {
 	const [count, setCount] = useState(0)
 	const increase = () => setCount((c) => c + 1)
 
@@ -20,6 +21,3 @@ function App() {
 		</main>
 	)
 }
-
-const root = createRoot(document.getElementById('root')!)
-root.render(<App />)

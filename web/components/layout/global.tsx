@@ -2,9 +2,6 @@ import type { PropsWithChildren } from 'react'
 
 import clsx from 'clsx'
 
-import '@web/styles/index.css'
-
-
 interface LayoutProps extends PropsWithChildren {
 	className?: string
 }
