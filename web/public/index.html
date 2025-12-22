@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Fable</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<link rel="stylesheet" href="/assets/styles.css" />
+	</head>
+	<body>
+		<div id="root"></div>
+		<script>
+			// Dev live-reload (SSE). Safe in prod: endpoint returns 404.
+			(() => {
+				try {
+					const es = new EventSource('/__dev/reload')
+					let reloading = false
+					es.addEventListener('reload', () => {
+						if (reloading) return
+						reloading = true
+						location.reload()
+					})
+					es.onerror = () => {
+						// Stop noisy reconnect loops when not in dev.
+						try { es.close() } catch {}
+					}
+				} catch {}
+			})()
+		</script>
+		<script type="module" src="/assets/client.js"></script>
+	</body>
+</html>
