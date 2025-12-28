@@ -1,0 +1,5 @@
+node_modules/
+web/public/assets/
+dex/.generated/
+*.log
+*.bun

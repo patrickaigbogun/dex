@@ -1,0 +1,31 @@
+{
+  "name": "@dex/router",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "dex-router": "./bin/dex-router.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./generate": {
+      "types": "./src/generate.ts",
+      "default": "./src/generate.ts"
+    },
+    "./client": {
+      "types": "./src/client/router.tsx",
+      "default": "./src/client/router.tsx"
+    }
+  },
+  "files": [
+    "src",
+    "bin"
+  ],
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

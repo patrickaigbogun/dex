@@ -1,0 +1,29 @@
+{
+  "name": "dex-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "bunx dex-router generate --pagesDir web/pages --layoutsDir web/layouts --outRoutesTs dex/.generated/routes.ts --outRoutesJson dex/.generated/manifest.json --outLayoutsTs dex/.generated/layouts.ts",
+    "build:css": "bunx @tailwindcss/cli -i web/styles/index.css -o web/public/assets/styles.css --minify",
+    "build:client": "bun build client/entry.tsx --target browser --minify --outfile web/public/assets/client.js",
+    "build": "bun run generate && bun run build:css && bun run build:client",
+    "dev": "bun scripts/dev.ts",
+    "start": "NODE_ENV=production bun app.ts"
+  },
+  "dependencies": {
+    "@dex/router": "workspace:*",
+    "@dex/server": "workspace:*",
+    "@dex/dev": "workspace:*",
+    "elysia": "latest",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.18",
+    "@tailwindcss/cli": "^4.1.18",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3"
+  }
+}
