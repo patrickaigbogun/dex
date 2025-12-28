@@ -2,6 +2,8 @@ export const metadata = {
 	title: 'Profile Account',
 }
 
+export const layout = 'dashboard'
+
 export default function Page() {
 	return (
 		<main>
