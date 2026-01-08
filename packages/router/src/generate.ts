@@ -80,6 +80,15 @@ function fileToLayoutName(relPosixNoExt: string) {
 	return n
 }
 
+function isLayoutModuleFile(absPath: string) {
+	if (absPath.endsWith('.d.ts')) return false
+	return absPath.endsWith('.tsx') || absPath.endsWith('.ts')
+}
+
+function stripTsOrTsxExtension(relPosix: string) {
+	return relPosix.replace(/\.(tsx|ts)$/i, '')
+}
+
 export async function generateLayouts(opts?: {
 	layoutsDir?: string
 	outTs?: string
@@ -87,14 +96,14 @@ export async function generateLayouts(opts?: {
 	const layoutsDirAbs = path.resolve(opts?.layoutsDir ?? './web/layouts')
 	const outTsAbs = path.resolve(opts?.outTs ?? './core/router/.generated/layouts.ts')
 
-	const filesAbs = (await walkIfExists(layoutsDirAbs)).filter((f) => f.endsWith('.tsx'))
+	const filesAbs = (await walkIfExists(layoutsDirAbs)).filter(isLayoutModuleFile)
 
 	const layouts: LayoutRecord[] = []
 	for (const abs of filesAbs) {
 		const rel = toPosix(path.relative(layoutsDirAbs, abs))
 		if (isIgnoredRouteFile(rel)) continue
 
-		const relNoExt = rel.replace(/\.tsx$/i, '')
+		const relNoExt = stripTsOrTsxExtension(rel)
 		const name = fileToLayoutName(relNoExt)
 		if (!name) continue
 
@@ -187,7 +196,7 @@ export async function watchAndGenerate(opts?: {
 			if (!watchers.has(dirAbs)) {
 				const w = watch(dirAbs, (_event, filename) => {
 					if (typeof filename === 'string') {
-						if (!filename.endsWith('.tsx')) {
+						if (!/\.(tsx|ts)$/i.test(filename) || filename.endsWith('.d.ts')) {
 							schedule(true)
 							return
 						}
