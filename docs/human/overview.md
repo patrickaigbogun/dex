@@ -1,6 +1,8 @@
 # Overview
 
-Dex is a Bun-first set of small packages that you compose into your app:
+Dex is a Bun-first set of small composable **packages** that you assemble into an app.
+
+The key idea is that the “framework” is not a monolith — it’s a set of packages you can compose.
 
 - `@dex/router` generates routes from your filesystem and provides a lightweight React client router runtime.
 - `@dex/server` provides Elysia helpers for static assets, SPA fallback, dev reload, and pretty request logging.
@@ -8,6 +10,13 @@ Dex is a Bun-first set of small packages that you compose into your app:
 - `dex` (CLI) scaffolds projects and delegates to your project’s scripts.
 
 Dex is intentionally explicit: generated files are readable, servers are “just Elysia”, and most behavior is opt-in.
+
+## Distribution (GitHub-only)
+
+Dex is distributed via GitHub Releases:
+
+- The `dex` CLI is a single compiled binary installed from a release.
+- Templates are `.tgz` assets that `dex scaffold` downloads and extracts.
 
 ## What you build
 

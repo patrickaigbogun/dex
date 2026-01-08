@@ -1,0 +1,117 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-cli:
+    name: Build dex binary (${{ matrix.target }})
+    runs-on: ${{ matrix.runsOn }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runsOn: ubuntu-latest
+          - target: linux-arm64
+            runsOn: ubuntu-latest
+          - target: darwin-x64
+            runsOn: macos-latest
+          - target: darwin-arm64
+            runsOn: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install deps
+        run: bun install
+
+      - name: Build dex binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          bun build --compile ./packages/cli/src/cli.ts --outfile ./dist/dex-${{ matrix.target }} --target=bun-${{ matrix.target }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-${{ matrix.target }}
+          path: dist/dex-${{ matrix.target }}
+
+  build-templates:
+    name: Build template tarballs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install deps
+        run: bun install
+
+      - name: Create template tgz
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # For now we publish the starter as the SPA template.
+          # CLI expects assets named dex-template-spa.tgz (and optionally dex-template-mpa.tgz).
+          tar -czf dist/dex-template-spa.tgz -C templates starter
+
+      - name: Upload template artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-templates
+          path: dist/*.tgz
+
+  publish-release:
+    name: Publish GitHub Release Assets
+    needs: [build-cli, build-templates]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # binaries
+          for d in dist/dex-*; do
+            if [[ -d "$d" ]]; then
+              f=$(find "$d" -maxdepth 1 -type f | head -n1 || true)
+              if [[ -n "${f}" ]]; then
+                bn=$(basename "$d")
+                cp "$f" "out/${bn}"
+              fi
+            fi
+          done
+          # templates
+          if [[ -d dist/dex-templates ]]; then
+            cp dist/dex-templates/*.tgz out/
+          fi
+
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*

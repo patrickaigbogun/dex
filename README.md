@@ -5,9 +5,14 @@ Dex is a composable, Bun-first framework stack for building small full‑stack a
 - `@dex/server`: Elysia helpers (assets, SPA fallback, dev reload)
 - `@dex/dev`: tiny dev process supervisor
 
+Dex is made of composable **packages** (that’s the framework), but distribution is **GitHub-only**:
+
+- A single `dex` CLI binary (compiled with Bun) installed from GitHub Releases.
+- Templates shipped as `.tgz` release assets that `dex scaffold` downloads and extracts.
+
 ## Repo layout
 
-- `packages/` — published packages
+- `packages/` — composable packages (framework building blocks)
 - `templates/starter/` — minimal app template using the packages
 
 ## Try the starter
@@ -18,14 +23,10 @@ cd templates/starter
 bun run dev
 ```
 
-## Versioning & releases
-
-Dex uses Changesets.
+## Install `dex` (GitHub Releases)
 
 ```bash
-bun run changeset
-bun run version
-bun run release
+curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
 ```
 
-See `ROADMAP.md` for planned work.
+See `dist.README.md` for details.
