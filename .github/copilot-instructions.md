@@ -18,8 +18,8 @@ Run these from `templates/starter/`:
 ## Routing conventions (Dex)
 - Source pages: `templates/starter/web/pages/**/*.tsx`
 - Generated outputs (auto-generated; do not edit):
-  - `templates/starter/dex/.generated/routes.ts`
-  - `templates/starter/dex/.generated/layouts.ts`
+  - `templates/starter/core/router/.generated/routes.ts`
+  - `templates/starter/core/router/.generated/layouts.ts`
 - Client router runtime: `@dex/router/client`
 
 Rules:
@@ -39,4 +39,5 @@ Rules:
 ## Generated/artifacts
 - Don’t commit built assets or generated route output (already gitignored):
   - `templates/**/web/public/assets/`
-  - `templates/**/dex/.generated/`
+  - `templates/**/build/`
+  - `templates/**/core/router/.generated/`
