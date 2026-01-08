@@ -1,0 +1,23 @@
+{
+  "name": "@dex/cli",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "build": "bun build --compile ./src/cli.ts --outfile ./dist/dex"
+  },
+  "bin": {
+    "dex": "./bin/dex.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "bin",
+    "dist"
+  ]
+}
