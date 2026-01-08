@@ -12,11 +12,11 @@ spawnGroup([
 			'--layoutsDir',
 			'web/layouts',
 			'--outRoutesTs',
-			'dex/.generated/routes.ts',
+			'core/router/.generated/routes.ts',
 			'--outRoutesJson',
-			'dex/.generated/manifest.json',
+			'core/router/.generated/manifest.json',
 			'--outLayoutsTs',
-			'dex/.generated/layouts.ts',
+			'core/router/.generated/layouts.ts',
 		],
 	},
 	{
@@ -36,7 +36,7 @@ spawnGroup([
 		cmd: [
 			'bun',
 			'build',
-			'client/entry.tsx',
+			'core/bootstrap/web.tsx',
 			'--target',
 			'browser',
 			'--outfile',

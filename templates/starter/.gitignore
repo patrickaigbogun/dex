@@ -1,5 +1,6 @@
 node_modules/
 web/public/assets/
-dex/.generated/
+core/router/.generated/
+build/
 *.log
 *.bun

@@ -10,8 +10,12 @@ export default function Page() {
 				This is a minimal Dex template app.
 			</p>
 			<Link className="underline" to="/about">
-				Go to /about
+				Go to about page
 			</Link>
+			<br />
+			<Link className="underline" to="/test">
+                go to test
+            </Link>
 		</main>
 	)
 }

@@ -1,6 +1,8 @@
 import { Link } from '@dex/router/client'
 
-export const metadata = { title: 'About • Dex Starter' }
+export const metadata = { title: 'About • Dex Starter', }
+
+export const layout = 'about'
 
 export default function Page() {
 	return (

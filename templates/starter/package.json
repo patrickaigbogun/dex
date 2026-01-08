@@ -3,18 +3,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "bunx dex-router generate --pagesDir web/pages --layoutsDir web/layouts --outRoutesTs dex/.generated/routes.ts --outRoutesJson dex/.generated/manifest.json --outLayoutsTs dex/.generated/layouts.ts",
-    "build:css": "bunx @tailwindcss/cli -i web/styles/index.css -o web/public/assets/styles.css --minify",
-    "build:client": "bun build client/entry.tsx --target browser --minify --outfile web/public/assets/client.js",
-    "build": "bun run generate && bun run build:css && bun run build:client",
+    "generate": "bunx dex-router generate --pagesDir web/pages --layoutsDir web/layouts --outRoutesTs core/router/.generated/routes.ts --outRoutesJson core/router/.generated/manifest.json --outLayoutsTs core/router/.generated/layouts.ts",
+    "prepare:build": "bun scripts/prepare-build.ts",
+    "build:css": "bunx @tailwindcss/cli -i web/styles/index.css -o build/assets/styles.css --minify",
+    "build:client": "bun build core/bootstrap/web.tsx --target browser --minify --outfile build/assets/client.js",
+    "build:server": "bun build --compile server.prod.ts --outfile build/server",
+    "build": "bun run generate && bun run prepare:build && bun run build:css && bun run build:client && bun run build:server",
     "dev": "bun scripts/dev.ts",
-    "start": "NODE_ENV=production bun app.ts"
+    "start": "NODE_ENV=production ./build/server"
   },
   "dependencies": {
     "@dex/router": "workspace:*",
+    "@dex/pie": "workspace:*",
     "@dex/server": "workspace:*",
     "@dex/dev": "workspace:*",
-    "elysia": "latest",
+    "elysia": "^1.4.21",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwindcss": "^4.1.18",
