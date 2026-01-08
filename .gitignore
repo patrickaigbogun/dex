@@ -11,8 +11,12 @@ node_modules/
 .env.*.local
 
 # generated (Dex templates)
-templates/**/dex/.generated/
+templates/**/core/router/.generated/
 templates/**/web/public/assets/
+templates/**/build/
+
+# cli build outputs
+packages/cli/dist/
 
 # package manager locks
 package-lock.json
