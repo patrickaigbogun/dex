@@ -2,6 +2,8 @@ import path from 'node:path'
 import { statSync, watch, watchFile } from 'node:fs'
 import { Elysia } from 'elysia'
 
+type PrettyLogLevel = 'info' | 'error'
+
 export function dexAssetsRoute(opts: {
 	assetsDir: string
 	cacheControlProd?: string
@@ -149,4 +151,67 @@ export function dexSpaFallback(opts: { indexHtmlPath: string }) {
 
 		return Bun.file(opts.indexHtmlPath)
 	})
+}
+
+function shouldUseColor() {
+	if (process.env.NO_COLOR) return false
+	if (process.env.NODE_ENV === 'production') return false
+	return Boolean(process.stdout.isTTY)
+}
+
+function formatPrefix(level: PrettyLogLevel, useColor: boolean) {
+	const ts = new Date().toISOString()
+	if (!useColor) return `[${ts}]`
+
+	const dim = '\x1b[2m'
+	const reset = '\x1b[0m'
+	const levelColor = level === 'error' ? '\x1b[31m' : '\x1b[36m'
+	return `${dim}[${ts}]${reset} ${levelColor}${level.toUpperCase()}${reset}`
+}
+
+function formatStatus(status: number, useColor: boolean) {
+	if (!useColor) return String(status)
+	const reset = '\x1b[0m'
+	const color = status >= 500 ? '\x1b[31m' : status >= 400 ? '\x1b[33m' : '\x1b[32m'
+	return `${color}${status}${reset}`
+}
+
+export function dexPrettyLogger(opts?: {
+	ignore?: (pathname: string) => boolean
+	includeQuery?: boolean
+}) {
+	const useColor = shouldUseColor()
+	const includeQuery = opts?.includeQuery ?? false
+	const starts = new WeakMap<Request, number>()
+
+	// Use a function-plugin so hooks attach to the parent app.
+	return (app: Elysia) =>
+		app
+			.onRequest(({ request }) => {
+				starts.set(request, performance.now())
+			})
+			.onAfterResponse(({ request, set }) => {
+				const url = new URL(request.url)
+				if (opts?.ignore?.(url.pathname)) return
+
+				const start = starts.get(request)
+				const ms = start === undefined ? undefined : Math.max(0, performance.now() - start)
+				const status = typeof set.status === 'number' ? set.status : 200
+				const pathWithQuery = includeQuery ? `${url.pathname}${url.search}` : url.pathname
+
+				const prefix = formatPrefix('info', useColor)
+				const statusText = formatStatus(status, useColor)
+				const msText = ms === undefined ? '' : ` ${ms.toFixed(1)}ms`
+				console.log(`${prefix} ${request.method} ${pathWithQuery} ${statusText}${msText}`)
+			})
+			.onError(({ request, error, set }) => {
+				const url = new URL(request.url)
+				if (opts?.ignore?.(url.pathname)) return
+
+				const status = typeof set.status === 'number' ? set.status : 500
+				const prefix = formatPrefix('error', useColor)
+				const statusText = formatStatus(status, useColor)
+				console.error(`${prefix} ${request.method} ${url.pathname} ${statusText}`)
+				console.error(error)
+			})
 }
