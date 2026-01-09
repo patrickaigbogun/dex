@@ -31,9 +31,6 @@ jobs:
           - target: windows-x64
             runsOn: windows-latest
             ext: '.exe'
-          - target: windows-arm64
-            runsOn: windows-latest
-            ext: '.exe'
 
     steps:
       - uses: actions/checkout@v4

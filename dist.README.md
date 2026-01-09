@@ -31,6 +31,5 @@ DEX_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/patr
 - `dex-darwin-x64`
 - `dex-darwin-arm64`
 - `dex-windows-x64.exe`
-- `dex-windows-arm64.exe`
 - `dex-template-spa.tgz`
 
