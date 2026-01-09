@@ -18,6 +18,9 @@ templates/**/core/router/.generated/
 templates/**/web/public/assets/
 templates/**/build/
 
+# accidental artifacts
+templates/starter/generate
+
 # cli build outputs
 packages/cli/dist/
 
