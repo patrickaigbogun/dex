@@ -29,4 +29,10 @@ bun run dev
 curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
 ```
 
+Scaffold the starter template:
+
+```bash
+DEX_TEMPLATE_REPO=patrickaigbogun/dex dex scaffold ./myapp --tag latest
+```
+
 See `dist.README.md` for details.
