@@ -18,12 +18,22 @@ jobs:
         include:
           - target: linux-x64
             runsOn: ubuntu-latest
+            ext: ''
           - target: linux-arm64
             runsOn: ubuntu-latest
+            ext: ''
           - target: darwin-x64
             runsOn: macos-latest
+            ext: ''
           - target: darwin-arm64
             runsOn: macos-latest
+            ext: ''
+          - target: windows-x64
+            runsOn: windows-latest
+            ext: '.exe'
+          - target: windows-arm64
+            runsOn: windows-latest
+            ext: '.exe'
 
     steps:
       - uses: actions/checkout@v4
@@ -41,13 +51,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          bun build --compile ./packages/cli/src/cli.ts --outfile ./dist/dex-${{ matrix.target }} --target=bun-${{ matrix.target }}
+          bun build --compile ./packages/cli/src/cli.ts --outfile ./dist/dex-${{ matrix.target }}${{ matrix.ext }} --target=bun-${{ matrix.target }}
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dex-${{ matrix.target }}
-          path: dist/dex-${{ matrix.target }}
+          name: dex-${{ matrix.target }}${{ matrix.ext }}
+          path: dist/dex-${{ matrix.target }}${{ matrix.ext }}
 
   build-templates:
     name: Build template tarballs
@@ -100,8 +110,7 @@ jobs:
             if [[ -d "$d" ]]; then
               f=$(find "$d" -maxdepth 1 -type f | head -n1 || true)
               if [[ -n "${f}" ]]; then
-                bn=$(basename "$d")
-                cp "$f" "out/${bn}"
+                cp "$f" "out/$(basename "$f")"
               fi
             fi
           done
