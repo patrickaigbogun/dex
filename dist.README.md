@@ -4,7 +4,7 @@ Dex is distributed via GitHub Releases:
 
 - `dex` is a single compiled binary built with `bun build --compile`.
 - Templates are `.tgz` assets (e.g. `dex-template-spa.tgz`).
-- `dex scaffold` downloads a template asset from a release and extracts it.
+- `dex scaffold` downloads a template asset and Dex package assets from a release and extracts them.
 
 ## Install (one-liner)
 
@@ -32,4 +32,8 @@ DEX_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/patr
 - `dex-darwin-arm64`
 - `dex-windows-x64.exe`
 - `dex-template-spa.tgz`
+- `dex-package-router.tgz`
+- `dex-package-server.tgz`
+- `dex-package-dev.tgz`
+- `dex-package-pie.tgz`
 

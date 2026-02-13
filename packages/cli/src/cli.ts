@@ -12,6 +12,7 @@ type Mode = 'spa' | 'mpa'
 type DexConfig = {
 	mode?: Mode
 	port?: number
+	packageVersions?: Record<string, string>
 }
 
 function usage(exitCode = 0) {
@@ -26,6 +27,8 @@ Usage:
 Scaffold options:
   --repo <owner/repo>        GitHub repo containing release templates
   --tag <tag|latest>         Release tag (default: latest)
+	--packages-repo <owner/repo>  GitHub repo containing dex-package-*.tgz assets
+	--packages-tag <tag|latest>   Release tag for dex-package-*.tgz assets
 	--template <path>          Use local template .tgz instead of GitHub
 	--template-url <url>       Download template .tgz from a URL (skips GitHub)
   --no-install               Do not run bun install
@@ -37,6 +40,8 @@ Environment:
   DEX_TEMPLATE_REPO          Default template repo (owner/repo)
 	DEX_TEMPLATE_TGZ           Local template .tgz path (skips GitHub)
 	DEX_TEMPLATE_URL           Template .tgz URL (skips GitHub)
+	DEX_PACKAGE_REPO           Package repo (owner/repo) for dex-package-*.tgz assets
+	DEX_PACKAGE_TAG            Release tag for dex-package-*.tgz (default: template tag)
   DEX_CACHE_DIR              Optional cache directory for template downloads
   DEX_TEMPLATE_CACHE_TTL_MS   TTL for cached 'latest' template (default: 1800000)
 	DEX_FETCH_TIMEOUT_MS        Network timeout for GitHub fetches (default: 30000)
@@ -131,6 +136,19 @@ function repoFromEnvOrFlag(flags: Record<string, string | boolean>): string {
 	}
 	if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error(`Invalid --repo format: ${repo}`)
 	return repo
+}
+
+function packageRepoFromEnvOrFlag(flags: Record<string, string | boolean>): string | null {
+	const repo = (flags['packages-repo'] as string | undefined) ?? process.env.DEX_PACKAGE_REPO
+	if (!repo) return null
+	if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error(`Invalid package repo format: ${repo}`)
+	return repo
+}
+
+function packageTagFromEnvOrFlag(flags: Record<string, string | boolean>): string | null {
+	const tag = (flags['packages-tag'] as string | undefined) ?? process.env.DEX_PACKAGE_TAG
+	if (!tag) return null
+	return String(tag)
 }
 
 async function githubRelease(repo: string, tag: string) {
@@ -434,6 +452,27 @@ async function setPackageName(destDir: string) {
 	}
 }
 
+async function updateDexPackageVersions(destDir: string, versions: Record<string, string>) {
+	const pkgPath = path.join(destDir, 'package.json')
+	if (!existsSync(pkgPath)) return
+	try {
+		const pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
+		const dex = pkg.dex && typeof pkg.dex === 'object' ? pkg.dex : {}
+		dex.packageVersions = { ...(dex.packageVersions ?? {}), ...versions }
+		pkg.dex = dex
+		await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
+	} catch {
+		// ignore
+	}
+}
+
+async function writePackagesIndex(destDir: string, packageDirs: string[]) {
+	const packagesDir = path.join(destDir, 'packages')
+	await mkdir(packagesDir, { recursive: true })
+	const lines = packageDirs.map((p) => `export * from './${p}/src/index'`)
+	await writeFile(path.join(packagesDir, 'index.ts'), lines.join('\n') + '\n')
+}
+
 async function cmdScaffold(dirArg: string, flags: Record<string, string | boolean>) {
 	const step = createSteps()
 
@@ -453,18 +492,18 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 	const localTemplate = templatePathFromEnvOrFlag(flags)
 	const templateUrl = templateUrlFromEnvOrFlag(flags)
 
-	const tgz = await step(`Resolve template (${assetName})`, async () => {
+	const template = await step(`Resolve template (${assetName})`, async () => {
 		if (localTemplate) {
 			if (!existsSync(localTemplate)) throw new Error(`Template not found: ${localTemplate}`)
 			process.stdout.write(`   template source: local (${localTemplate})\n`)
-			return localTemplate
+			return { path: localTemplate, source: 'local' as const }
 		}
 
 		if (templateUrl) {
 			const { path: p, cache } = await getTemplateTgzPathFromUrl(templateUrl)
 			process.stdout.write(`   template source: url (${templateUrl})\n`)
 			process.stdout.write(`   template cache: ${cache}\n`)
-			return p
+			return { path: p, source: 'url' as const }
 		}
 
 		const repo = repoFromEnvOrFlag(flags)
@@ -473,7 +512,7 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 			const { path: p, cache } = await getTemplateTgzPath(repo, tag, assetName)
 			process.stdout.write(`   template source: github (${repo}@${tag})\n`)
 			process.stdout.write(`   template cache: ${cache}\n`)
-			return p
+			return { path: p, source: 'github' as const, repo, tag }
 		} catch (err: any) {
 			const msg = err?.message ?? String(err)
 			if (String(msg).includes('Request timed out')) {
@@ -491,11 +530,50 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 	})
 
 	await step('Extract template', async () => {
-		await extractTemplate(tgz, destDir)
+		await extractTemplate(template.path, destDir)
 	})
 
 	await step('Finalize project files', async () => {
 		await setPackageName(destDir)
+	})
+
+	await step('Fetch framework packages', async () => {
+		const repo =
+			packageRepoFromEnvOrFlag(flags) ??
+			(template.source === 'github' ? template.repo : null)
+		if (!repo) {
+			throw new Error(
+				'Missing package repo. Set DEX_PACKAGE_REPO (or pass --packages-repo) to fetch dex-package-*.tgz assets.'
+			)
+		}
+		const tag =
+			packageTagFromEnvOrFlag(flags) ??
+			(template.source === 'github' ? template.tag : 'latest')
+
+		const packagesDir = path.join(destDir, 'packages')
+		await mkdir(packagesDir, { recursive: true })
+
+		const packageDirs = ['router', 'server', 'dev', 'pie']
+		const versions: Record<string, string> = {}
+		for (const pkg of packageDirs) {
+			const asset = `dex-package-${pkg}.tgz`
+			const { path: p, cache } = await getTemplateTgzPath(repo, tag, asset)
+			process.stdout.write(`   package ${pkg}: ${cache} (${asset})\n`)
+			const outDir = path.join(packagesDir, pkg)
+			await extractTemplate(p, outDir)
+
+			const pkgJsonPath = path.join(outDir, 'package.json')
+			if (!existsSync(pkgJsonPath)) continue
+			try {
+				const pkgJson = JSON.parse(await readFile(pkgJsonPath, 'utf8'))
+				if (pkgJson?.name && pkgJson?.version) versions[pkgJson.name] = pkgJson.version
+			} catch {
+				// ignore
+			}
+		}
+
+		await writePackagesIndex(destDir, packageDirs)
+		await updateDexPackageVersions(destDir, versions)
 	})
 
 	if (!flags['no-install']) {

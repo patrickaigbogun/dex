@@ -2,6 +2,9 @@
   "name": "dex-starter",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "generate": "bunx dex-router generate --pagesDir web/pages --layoutsDir web/layouts --outRoutesTs core/router/.generated/routes.ts --outRoutesJson core/router/.generated/manifest.json --outLayoutsTs core/router/.generated/layouts.ts",
     "prepare:build": "bun scripts/prepare-build.ts",

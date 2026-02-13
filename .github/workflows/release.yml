@@ -85,9 +85,38 @@ jobs:
           name: dex-templates
           path: dist/*.tgz
 
+  build-packages:
+    name: Build package tarballs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install deps
+        run: bun install
+
+      - name: Create package tgz
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for pkg in router server dev pie; do
+            tar -czf "dist/dex-package-${pkg}.tgz" -C packages "${pkg}"
+          done
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-packages
+          path: dist/dex-package-*.tgz
+
   publish-release:
     name: Publish GitHub Release Assets
-    needs: [build-cli, build-templates]
+    needs: [build-cli, build-templates, build-packages]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +143,10 @@ jobs:
           # templates
           if [[ -d dist/dex-templates ]]; then
             cp dist/dex-templates/*.tgz out/
+          fi
+          # packages
+          if [[ -d dist/dex-packages ]]; then
+            cp dist/dex-packages/*.tgz out/
           fi
 
       - name: Upload assets to release

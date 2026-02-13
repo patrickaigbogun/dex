@@ -2,6 +2,8 @@
 
 The starter template is the reference integration of the core packages.
 
+When scaffolded from a release, Dex packages are downloaded as tarballs and placed under `packages/` in the new app to keep `@dex/*` imports local.
+
 ## Dev workflow
 
 From `templates/starter/`:
