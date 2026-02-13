@@ -44,6 +44,10 @@ Sync options:
 Start options:
   -p                         Production mode (NODE_ENV=production)
 
+Version:
+  -v, --version              Show CLI version
+  --version -f               Show framework template version (if in scaffolded project)
+
 Environment:
   DEX_TEMPLATE_REPO          Default template repo (owner/repo)
 	DEX_TEMPLATE_TGZ           Local template .tgz path (skips GitHub)
@@ -102,8 +106,8 @@ function parseArgs(argv: string[]) {
 			positional.push(a)
 			continue
 		}
-		if (a === '--no-install') {
-			flags['no-install'] = true
+		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f') {
+			flags[a.replace(/^--?/, '')] = true
 			continue
 		}
 		if (a === '-p') {
@@ -135,6 +139,152 @@ async function promptSelect(question: string, options: string[]) {
 	const n = Number(answer)
 	if (!Number.isFinite(n) || n < 1 || n > options.length) throw new Error('Invalid selection')
 	return options[n - 1]!
+}
+
+async function promptMultiSelect(question: string, options: string[]): Promise<string[]> {
+	const stdin = process.stdin
+	const stdout = process.stdout
+	stdout.write(`${question}\n`)
+	const selected = new Set<number>()
+	
+	let displaying = true
+	while (displaying) {
+		stdout.write('\nOptions:\n')
+		for (let i = 0; i < options.length; i++) {
+			const checked = selected.has(i) ? '[x]' : '[ ]'
+			stdout.write(`  ${checked} ${i + 1}) ${options[i]}\n`)
+		}
+		stdout.write('\nEnter number to toggle, or "done" to finish: > ')
+
+		stdin.setEncoding('utf8')
+		const answer = await new Promise<string>((resolve) => {
+			stdin.once('data', (d) => resolve(String(d).trim()))
+		})
+
+		if (answer.toLowerCase() === 'done') {
+			displaying = false
+		} else {
+			const n = Number(answer)
+			if (Number.isFinite(n) && n >= 1 && n <= options.length) {
+				const idx = n - 1
+				if (selected.has(idx)) {
+					selected.delete(idx)
+				} else {
+					selected.add(idx)
+				}
+			}
+		}
+	}
+
+	return Array.from(selected)
+		.sort((a, b) => a - b)
+		.map((i) => options[i]!)
+}
+
+type TemplateDiff = {
+	version: string
+	previousVersion: string | null
+	changedFiles: string[]
+}
+
+async function fetchTemplateDiff(repo: string, tag: string): Promise<TemplateDiff | null> {
+	const asset = `dex-diff-${tag}.json`
+	const url = `https://api.github.com/repos/${repo}/releases/download/${encodeURIComponent(tag)}/${asset}`
+	
+	const headers: Record<string, string> = {
+		Accept: 'application/vnd.github+json',
+		'X-GitHub-Api-Version': '2022-11-28',
+	}
+	if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+
+	try {
+		const res = await fetchWithTimeout(url, { headers })
+		if (!res.ok) return null
+		return (await res.json()) as TemplateDiff
+	} catch {
+		return null
+	}
+}
+
+async function cmdSync(flags: Record<string, string | boolean>) {
+	const step = createSteps()
+
+	const found = await step('Locate project', async () => {
+		const proj = await findProjectRoot(process.cwd())
+		if (!proj) throw new Error('Not in a Dex project (missing dex.config.*)')
+		return proj
+	})
+
+	const metadata = await step('Load template metadata', async () => {
+		const meta = await getTemplateMetadata()
+		if (!meta) throw new Error('No template metadata found. Are you in a scaffolded app?')
+		return meta
+	})
+
+	const repo = (flags.repo as string | undefined) ?? process.env.DEX_TEMPLATE_REPO
+	if (!repo) throw new Error('Missing repo. Provide --repo <owner/repo> or set DEX_TEMPLATE_REPO')
+
+	const tag = (flags.tag as string | undefined) ?? metadata.releaseTag ?? 'latest'
+
+	const diff = await step('Fetch template diff', async () => {
+		const d = await fetchTemplateDiff(repo, tag)
+		if (!d) throw new Error(`Diff not found for ${repo}@${tag}`)
+		return d
+	})
+
+	let filesToSync: string[] = []
+	if (flags.interactive) {
+		filesToSync = await step('Select files to sync', async () => {
+			return await promptMultiSelect('Select files to sync:', diff.changedFiles)
+		})
+	} else {
+		filesToSync = diff.changedFiles
+		process.stdout.write(`\n▶ Auto-sync all ${filesToSync.length} changed files\n`)
+	}
+
+	if (filesToSync.length === 0) {
+		console.log('No files selected. Exiting.')
+		return
+	}
+
+	await step('Download and sync template', async () => {
+		const templateAsset = 'dex-template-spa.tgz'
+		const { path: tgzPath } = await getTemplateTgzPath(repo, tag, templateAsset)
+
+		const tempExtractDir = path.join(os.tmpdir(), `dex-sync-${Date.now()}`)
+		await mkdir(tempExtractDir, { recursive: true })
+
+		try {
+			await extractTemplate(tgzPath, tempExtractDir)
+
+			for (const file of filesToSync) {
+				const src = path.join(tempExtractDir, file)
+				const dst = path.join(found.root, file)
+
+				if (!existsSync(src)) {
+					process.stdout.write(`   ⊘ source not found: ${file}\n`)
+					continue
+				}
+
+				await mkdir(path.dirname(dst), { recursive: true })
+				await Bun.write(dst, Bun.file(src))
+				process.stdout.write(`   ✓ ${file}\n`)
+			}
+		} finally {
+			// cleanup temp dir
+			try {
+				await (await import('node:fs/promises')).rm(tempExtractDir, { recursive: true, force: true })
+			} catch {
+				// ignore
+			}
+		}
+	})
+
+	await step('Update metadata', async () => {
+		await writeDexMetadata(found.root, tag, tag)
+	})
+
+	console.log(`\nSynced ${filesToSync.length} files from ${repo}@${tag} ✓`)
 }
 
 function repoFromEnvOrFlag(flags: Record<string, string | boolean>): string {
@@ -474,6 +624,17 @@ async function updateDexPackageVersions(destDir: string, versions: Record<string
 	}
 }
 
+async function writeDexMetadata(destDir: string, templateVersion: string, templateTag: string) {
+	const dexDir = path.join(destDir, '.dex')
+	await mkdir(dexDir, { recursive: true })
+	const metadata: DexMetadata = {
+		version: templateVersion,
+		releaseTag: templateTag,
+		syncedAt: new Date().toISOString(),
+	}
+	await writeFile(path.join(dexDir, 'metadata.json'), JSON.stringify(metadata, null, 2) + '\n')
+}
+
 async function writePackagesIndex(destDir: string, packageDirs: string[]) {
 	const packagesDir = path.join(destDir, 'packages')
 	await mkdir(packagesDir, { recursive: true })
@@ -618,6 +779,10 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 
 		await writePackagesIndex(destDir, packageDirs)
 		await updateDexPackageVersions(destDir, versions)
+
+		// Track template version in metadata
+		const templateVersion = template.source === 'github' && template.tag ? template.tag : 'unknown'
+		await writeDexMetadata(destDir, templateVersion, templateVersion)
 	})
 
 	await step('Verify scaffolded files', async () => {
@@ -666,6 +831,48 @@ async function cmdStart(prod: boolean) {
 	}
 }
 
+async function getCliVersion(): Promise<string> {
+	const pkgPath = path.resolve('packages/cli/package.json')
+	try {
+		const pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
+		return pkg.version || 'unknown'
+	} catch {
+		return 'unknown'
+	}
+}
+
+type DexMetadata = {
+	version?: string
+	syncedAt?: string
+	releaseTag?: string
+}
+
+async function getTemplateMetadata(): Promise<DexMetadata | null> {
+	const metadataPath = path.join(process.cwd(), '.dex', 'metadata.json')
+	if (!existsSync(metadataPath)) return null
+	try {
+		return JSON.parse(await readFile(metadataPath, 'utf8'))
+	} catch {
+		return null
+	}
+}
+
+async function cmdVersion(showTemplate: boolean) {
+	const cliVersion = await getCliVersion()
+	console.log(`dex ${cliVersion}`)
+
+	if (showTemplate) {
+		const metadata = await getTemplateMetadata()
+		if (!metadata) {
+			console.error('Not in a scaffolded Dex project (no .dex/metadata.json found)')
+			process.exit(1)
+		}
+		if (metadata.version) {
+			console.log(`template: ${metadata.version}`)
+		}
+	}
+}
+
 async function main() {
 	const argv = process.argv.slice(2)
 	const { positional, flags } = parseArgs(argv)
@@ -673,11 +880,21 @@ async function main() {
 
 	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') usage(0)
 
+	if (flags.v || flags.version) {
+		await cmdVersion(Boolean(flags.f))
+		return
+	}
+
 	try {
 		if (cmd === 'scaffold') {
 			const dir = positional[1]
 			if (!dir) usage(1)
 			await cmdScaffold(dir, flags)
+			return
+		}
+
+		if (cmd === 'sync') {
+			await cmdSync(flags)
 			return
 		}
 
