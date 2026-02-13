@@ -181,6 +181,19 @@ async function promptMultiSelect(question: string, options: string[]): Promise<s
 		.map((i) => options[i]!)
 }
 
+async function promptConfirm(question: string): Promise<boolean> {
+	const stdin = process.stdin
+	const stdout = process.stdout
+	stdout.write(`${question} (y/n) > `)
+
+	stdin.setEncoding('utf8')
+	const answer = await new Promise<string>((resolve) => {
+		stdin.once('data', (d) => resolve(String(d).trim().toLowerCase()))
+	})
+
+	return answer === 'y' || answer === 'yes'
+}
+
 type TemplateDiff = {
 	version: string
 	previousVersion: string | null
@@ -189,12 +202,9 @@ type TemplateDiff = {
 
 async function fetchTemplateDiff(repo: string, tag: string): Promise<TemplateDiff | null> {
 	const asset = `dex-diff-${tag}.json`
-	const url = `https://api.github.com/repos/${repo}/releases/download/${encodeURIComponent(tag)}/${asset}`
+	const url = `https://github.com/${repo}/releases/download/${encodeURIComponent(tag)}/${asset}`
 	
-	const headers: Record<string, string> = {
-		Accept: 'application/vnd.github+json',
-		'X-GitHub-Api-Version': '2022-11-28',
-	}
+	const headers: Record<string, string> = {}
 	if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
 
 	try {
@@ -217,14 +227,23 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 
 	const metadata = await step('Load template metadata', async () => {
 		const meta = await getTemplateMetadata()
-		if (!meta) throw new Error('No template metadata found. Are you in a scaffolded app?')
+		if (!meta) {
+			// Metadata not found, but project exists. Ask if user wants to continue
+			const proceed = await promptConfirm('This is an older Dex project without metadata. Continue syncing?')
+			if (!proceed) {
+				console.log('Cancelled.')
+				process.exit(0)
+			}
+			// Return empty metadata; user must provide --repo
+			return {}
+		}
 		return meta
 	})
 
-	const repo = (flags.repo as string | undefined) ?? process.env.DEX_TEMPLATE_REPO
+	const repo = (flags.repo as string | undefined) ?? (metadata as any)?.repo ?? process.env.DEX_TEMPLATE_REPO
 	if (!repo) throw new Error('Missing repo. Provide --repo <owner/repo> or set DEX_TEMPLATE_REPO')
 
-	const tag = (flags.tag as string | undefined) ?? metadata.releaseTag ?? 'latest'
+	const tag = (flags.tag as string | undefined) ?? (metadata as any)?.releaseTag ?? 'latest'
 
 	const diff = await step('Fetch template diff', async () => {
 		const d = await fetchTemplateDiff(repo, tag)
@@ -832,13 +851,30 @@ async function cmdStart(prod: boolean) {
 }
 
 async function getCliVersion(): Promise<string> {
-	const pkgPath = path.resolve('packages/cli/package.json')
-	try {
-		const pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
-		return pkg.version || 'unknown'
-	} catch {
-		return 'unknown'
+	// In compiled mode, try to find package.json in common locations
+	// The binary could be: /dist/dex (in repo), ~/.bun/bin/dex (installed), or wherever
+	const dir = import.meta.url ? path.dirname(import.meta.url.replace('file://', '')) : process.cwd()
+	
+	const searchPaths = [
+		path.resolve(dir, '../../package.json'), // from src/
+		path.resolve(dir, '../../../packages/cli/package.json'), // from dist/
+		path.resolve(dir, 'package.json'),
+		path.join(process.cwd(), 'package.json'),
+		'/home/oti/projects/dex/packages/cli/package.json', // dev fallback
+	]
+
+	for (const pkgPath of searchPaths) {
+		try {
+			if (existsSync(pkgPath)) {
+				const pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
+				if (pkg.version) return pkg.version
+			}
+		} catch {
+			// ignore and try next
+		}
 	}
+
+	return 'unknown'
 }
 
 type DexMetadata = {
@@ -878,12 +914,13 @@ async function main() {
 	const { positional, flags } = parseArgs(argv)
 	const cmd = positional[0]
 
-	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') usage(0)
-
+	// Check version first (before help check)
 	if (flags.v || flags.version) {
 		await cmdVersion(Boolean(flags.f))
 		return
 	}
+
+	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') usage(0)
 
 	try {
 		if (cmd === 'scaffold') {
