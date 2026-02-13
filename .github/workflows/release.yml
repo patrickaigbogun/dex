@@ -79,11 +79,25 @@ jobs:
           # CLI expects assets named dex-template-spa.tgz (and optionally dex-template-mpa.tgz).
           tar -czf dist/dex-template-spa.tgz -C templates starter
 
+      - name: Generate template diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+          bun scripts/generate-template-diff.ts "${CURRENT_TAG}" "${PREV_TAG}"
+
       - name: Upload template artifact
         uses: actions/upload-artifact@v4
         with:
           name: dex-templates
           path: dist/*.tgz
+
+      - name: Upload diff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-diff
+          path: dist/dex-diff-*.json
 
   build-packages:
     name: Build package tarballs
@@ -147,6 +161,10 @@ jobs:
           # packages
           if [[ -d dist/dex-packages ]]; then
             cp dist/dex-packages/*.tgz out/
+          fi
+          # diffs
+          if [[ -d dist/dex-diff ]]; then
+            cp dist/dex-diff/*.json out/
           fi
 
       - name: Upload assets to release

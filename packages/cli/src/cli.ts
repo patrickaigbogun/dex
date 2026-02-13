@@ -15,12 +15,15 @@ type DexConfig = {
 	packageVersions?: Record<string, string>
 }
 
+const DEFAULT_PACKAGES = ['router', 'server', 'dev', 'pie']
+
 function usage(exitCode = 0) {
 	const out = exitCode === 0 ? console.log : console.error
 	out(`dex
 
 Usage:
   dex scaffold <dir>
+  dex sync [--interactive]
   dex build
   dex start [-p]
 
@@ -32,6 +35,11 @@ Scaffold options:
 	--template <path>          Use local template .tgz instead of GitHub
 	--template-url <url>       Download template .tgz from a URL (skips GitHub)
   --no-install               Do not run bun install
+
+Sync options:
+  --interactive              Interactively select files to sync (default: all)
+  --repo <owner/repo>        Template repo (default from .dex/metadata.json)
+  --tag <tag>                Release tag (default: latest)
 
 Start options:
   -p                         Production mode (NODE_ENV=production)
@@ -473,6 +481,42 @@ async function writePackagesIndex(destDir: string, packageDirs: string[]) {
 	await writeFile(path.join(packagesDir, 'index.ts'), lines.join('\n') + '\n')
 }
 
+function findAnyExisting(baseDir: string, rels: string[]) {
+	for (const rel of rels) {
+		const p = path.join(baseDir, rel)
+		if (existsSync(p)) return p
+	}
+	return null
+}
+
+function runScaffoldChecks(destDir: string, packageDirs: string[]) {
+	const warnings: string[] = []
+	const pkgJson = path.join(destDir, 'package.json')
+	if (!existsSync(pkgJson)) warnings.push('Missing package.json in project root.')
+
+	const dexConfig = findAnyExisting(destDir, [
+		'dex.config.ts',
+		'dex.config.js',
+		'dex.config.mjs',
+		'dex.config.json',
+		'config/dex.config.ts',
+		'config/dex.config.js',
+		'config/dex.config.mjs',
+		'config/dex.config.json',
+	])
+	if (!dexConfig) warnings.push('Missing dex.config.* (or config/dex.config.*).')
+
+	const packagesDir = path.join(destDir, 'packages')
+	if (!existsSync(packagesDir)) warnings.push('Missing packages/ directory.')
+
+	for (const pkg of packageDirs) {
+		const p = path.join(destDir, 'packages', pkg, 'package.json')
+		if (!existsSync(p)) warnings.push(`Missing packages/${pkg}/package.json.`)
+	}
+
+	return warnings
+}
+
 async function cmdScaffold(dirArg: string, flags: Record<string, string | boolean>) {
 	const step = createSteps()
 
@@ -553,7 +597,7 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 		const packagesDir = path.join(destDir, 'packages')
 		await mkdir(packagesDir, { recursive: true })
 
-		const packageDirs = ['router', 'server', 'dev', 'pie']
+		const packageDirs = DEFAULT_PACKAGES
 		const versions: Record<string, string> = {}
 		for (const pkg of packageDirs) {
 			const asset = `dex-package-${pkg}.tgz`
@@ -576,6 +620,15 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 		await updateDexPackageVersions(destDir, versions)
 	})
 
+	await step('Verify scaffolded files', async () => {
+		const warnings = runScaffoldChecks(destDir, DEFAULT_PACKAGES)
+		if (warnings.length) {
+			process.stderr.write(`\n⚠ Scaffold checks reported issues:\n`)
+			for (const w of warnings) process.stderr.write(`  - ${w}\n`)
+			process.stderr.write('  (Continuing as requested.)\n')
+		}
+	})
+
 	if (!flags['no-install']) {
 		await step('Install dependencies (bun install)', async () => {
 			const { cmd, env } = bunCmd()
@@ -586,6 +639,7 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 	}
 
 	console.log(`\nScaffolded ${mode} project in ${destDir}`)
+	process.exit(0)
 }
 
 async function cmdBuild() {
