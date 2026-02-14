@@ -194,6 +194,15 @@ async function promptConfirm(question: string): Promise<boolean> {
 	return answer === 'y' || answer === 'yes'
 }
 
+async function getLatestReleaseTag(repo: string): Promise<string | null> {
+	try {
+		const release = await githubRelease(repo, 'latest')
+		return release?.tag_name
+	} catch {
+		return null
+	}
+}
+
 type TemplateDiff = {
 	version: string
 	previousVersion: string | null
@@ -243,7 +252,13 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 	const repo = (flags.repo as string | undefined) ?? (metadata as any)?.repo ?? process.env.DEX_TEMPLATE_REPO
 	if (!repo) throw new Error('Missing repo. Provide --repo <owner/repo> or set DEX_TEMPLATE_REPO')
 
-	const tag = (flags.tag as string | undefined) ?? (metadata as any)?.releaseTag ?? 'latest'
+	let tag = (flags.tag as string | undefined) ?? (metadata as any)?.releaseTag
+	if (!tag) {
+		process.stdout.write(`\n⚠ No --tag provided. Fetching latest release...\n`)
+		tag = await getLatestReleaseTag(repo)
+		if (!tag) throw new Error('Could not determine latest release tag')
+		process.stdout.write(`ℹ Using tag: ${tag}\n`)
+	}
 
 	const diff = await step('Fetch template diff', async () => {
 		const d = await fetchTemplateDiff(repo, tag)
@@ -254,7 +269,14 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 	let filesToSync: string[] = []
 	if (flags.interactive) {
 		filesToSync = await step('Select files to sync', async () => {
-			return await promptMultiSelect('Select files to sync:', diff.changedFiles)
+			const selected = await promptMultiSelect('Select files to sync:', diff.changedFiles)
+			// Close stdin after interactive prompt to prevent process from hanging
+			if (process.stdin.destroy) {
+				try {
+					process.stdin.destroy()
+				} catch {}
+			}
+			return selected
 		})
 	} else {
 		filesToSync = diff.changedFiles
@@ -304,6 +326,9 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 	})
 
 	console.log(`\nSynced ${filesToSync.length} files from ${repo}@${tag} ✓`)
+
+	// Exit process to ensure stdin is closed and process terminates
+	process.exit(0)
 }
 
 function repoFromEnvOrFlag(flags: Record<string, string | boolean>): string {
