@@ -24,5 +24,8 @@ templates/starter/generate
 # cli build outputs
 packages/cli/dist/
 
+# private roadmap
+roadmap/
+
 # package manager locks
 package-lock.json

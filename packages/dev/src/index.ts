@@ -1,5 +1,11 @@
+/**
+ * Spawned process metadata for a managed task.
+ */
 export type Spawned = { name: string; proc: ReturnType<typeof Bun.spawn> }
 
+/**
+ * Spawn a set of tasks and terminate the group if any exits non-zero.
+ */
 export function spawnGroup(tasks: Array<{ name: string; cmd: string[] }>) {
 	const processes: Spawned[] = []
 	const raw = process.env.DEX_DEV_RAW === '1' || process.env.DEX_DEV_RAW === 'true'

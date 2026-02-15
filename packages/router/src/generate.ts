@@ -89,6 +89,9 @@ function stripTsOrTsxExtension(relPosix: string) {
 	return relPosix.replace(/\.(tsx|ts)$/i, '')
 }
 
+/**
+ * Generate layout loader map from the layouts directory.
+ */
 export async function generateLayouts(opts?: {
 	layoutsDir?: string
 	outTs?: string
@@ -124,6 +127,9 @@ export async function generateLayouts(opts?: {
 	await Bun.write(outTsAbs, ts)
 }
 
+/**
+ * Generate file-system based routes from the pages directory.
+ */
 export async function generateFsRoutes(opts?: {
 	pagesDir?: string
 	outTs?: string
@@ -173,6 +179,9 @@ export async function generateFsRoutes(opts?: {
 	await Bun.write(outJsonAbs, json)
 }
 
+/**
+ * Watch pages/layouts and regenerate routes on change.
+ */
 export async function watchAndGenerate(opts?: {
 	pagesDir?: string
 	layoutsDir?: string

@@ -43,6 +43,22 @@ bun run dev
 - Pages remain `.tsx` only.
 - Layout modules can be `.ts` or `.tsx` (excluding `.d.ts`).
 
+**Route composition helper**
+
+`@dex/router` exports `composeRoutes` to make API route registration a simple list:
+
+```ts
+import { composeRoutes } from '@dex/router'
+import health from './health'
+import users from './users'
+
+export function apiRoutes() {
+	return <const App extends Elysia>(app: App) => {
+		return composeRoutes(app, [health, users])
+	}
+}
+```
+
 ## `@dex/server`
 
 **Purpose**
@@ -58,11 +74,11 @@ Small Elysia plugins you compose into your own server.
 
 **Example (starter dev server)**
 
-See `templates/starter/app.ts`.
+See `templates/starter/core/app/index.ts`.
 
 **Example (starter production server)**
 
-See `templates/starter/server.prod.ts`.
+See `templates/starter/core/server/prod.ts`.
 
 ## `@dex/dev`
 
@@ -91,7 +107,7 @@ A typed API client built on Eden `treaty`, with a retrying transport and simple 
 
 ```ts
 import pie from '@dex/pie'
-import type { Api } from '../../api.app'
+import type { Api } from '@core/api'
 
 const client = pie<Api>('http://localhost:7990/api', {
 	retry: { retries: 2 },

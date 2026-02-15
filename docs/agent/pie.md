@@ -9,7 +9,7 @@ A small wrapper around Eden `treaty` that keeps Dex’s “explicit + typed” p
 
 ## Server side: define the API type
 
-In the starter template this lives in `templates/starter/api.app.ts`:
+In the starter template this lives in `templates/starter/core/api/index.ts`:
 
 ```ts
 import { Elysia } from 'elysia'
@@ -24,7 +24,7 @@ export type Api = typeof api
 
 ```ts
 import pie from '@dex/pie'
-import type { Api } from '../api.app'
+import type { Api } from '@core/api'
 
 const client = pie<Api>('http://localhost:7990/api', {
   pieHeaders: () => ({

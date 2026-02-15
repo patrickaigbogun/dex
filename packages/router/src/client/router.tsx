@@ -89,30 +89,45 @@ function getDefaultExport(mod: LayoutModule | any) {
 	return (mod as any)?.default ?? mod
 }
 
+/**
+ * Access route params from the current match.
+ */
 export function useParams<T extends Params = Params>() {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useParams must be used within <FileRouter />')
 	return ctx.params as T
 }
 
+/**
+ * Access the current URL query params as URLSearchParams.
+ */
 export function useQuery() {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useQuery must be used within <FileRouter />')
 	return ctx.query
 }
 
+/**
+ * Access the current location (pathname + search).
+ */
 export function useLocation() {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useLocation must be used within <FileRouter />')
 	return { pathname: ctx.pathname, search: ctx.search }
 }
 
+/**
+ * Programmatic navigation within the file router.
+ */
 export function useNavigate() {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useNavigate must be used within <FileRouter />')
 	return ctx.navigate
 }
 
+/**
+ * Client-side link that routes via the FileRouter context.
+ */
 export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) {
 	const navigate = useNavigate()
 	const { to, onClick, ...rest } = props
@@ -132,6 +147,9 @@ export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to
 	)
 }
 
+/**
+ * Props for the file-based router runtime.
+ */
 export type FileRouterProps = {
 	routes: Route[]
 	layouts?: Record<string, () => Promise<LayoutModule>>
@@ -141,6 +159,9 @@ export type FileRouterProps = {
 	error?: React.ComponentType<{ error: unknown }>
 }
 
+/**
+ * File-based router that renders pages and layouts by route match.
+ */
 export function FileRouter(props: FileRouterProps) {
 	const [loc, setLoc] = useState(() => ({
 		pathname: normalizePathname(window.location.pathname),

@@ -4,6 +4,9 @@ import { Elysia } from 'elysia'
 
 type PrettyLogLevel = 'info' | 'error'
 
+/**
+ * Serve static assets from a directory at `/assets/*`.
+ */
 export function dexAssetsRoute(opts: {
 	assetsDir: string
 	cacheControlProd?: string
@@ -32,6 +35,9 @@ type SSEClient = {
 	controller: ReadableStreamDefaultController<Uint8Array>
 }
 
+/**
+ * Dev-only SSE endpoint for triggering a client reload.
+ */
 export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalMs?: number }) {
 	const isProd = process.env.NODE_ENV === 'production'
 	const pollIntervalMs = opts?.pollIntervalMs ?? 250
@@ -136,6 +142,9 @@ export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalM
 	})
 }
 
+/**
+ * SPA fallback that serves the index HTML for non-asset GET requests.
+ */
 export function dexSpaFallback(opts: { indexHtmlPath: string }) {
 	return new Elysia().get('*', ({ request }) => {
 		if (request.method !== 'GET') return
@@ -176,6 +185,9 @@ function formatStatus(status: number, useColor: boolean) {
 	return `${color}${status}${reset}`
 }
 
+/**
+ * Pretty request logger for Elysia apps.
+ */
 export function dexPrettyLogger(opts?: {
 	ignore?: (pathname: string) => boolean
 	includeQuery?: boolean

@@ -5,6 +5,7 @@
 - Generator: `packages/router/src/generate.ts`
 - Types: `packages/router/src/types.ts`
 - Client runtime: `packages/router/src/client/router.tsx`
+- Route helper: `packages/router/src/composeRoutes.ts`
 
 ## Starter integration
 
