@@ -127,7 +127,7 @@ await client.health.get()
 - `dex build`: find project root and run `bun run build`.
 - `dex start`: run dev by default; `-p` runs production start.
 
-See `packages/cli/src/cli.ts`.
+See `framework/packages/cli/src/cli.ts`.
 
 ## Templates (`templates/starter`)
 

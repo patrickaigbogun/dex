@@ -17,13 +17,14 @@ type DexConfig = {
 
 const DEFAULT_PACKAGES = ['router', 'server', 'dev', 'pie']
 
-function usage(exitCode = 0) {
+function usage(exitCode = 0): never {
 	const out = exitCode === 0 ? console.log : console.error
 	out(`dex
 
 Usage:
   dex scaffold <dir>
   dex sync [--interactive]
+	dex tag <patch|minor|major>
   dex build
   dex start [-p]
 
@@ -43,6 +44,11 @@ Sync options:
 
 Start options:
   -p                         Production mode (NODE_ENV=production)
+
+Tag options:
+	patch                      Bump SemVer patch (e.g. v0.1.44 -> v0.1.45)
+	minor                      Bump SemVer minor (e.g. v0.1.44 -> v0.2.0)
+	major                      Bump SemVer major (e.g. v0.1.44 -> v1.0.0)
 
 Version:
   -v, --version              Show CLI version
@@ -595,6 +601,60 @@ async function run(cmd: string, args: string[], cwd: string, extraEnv?: Record<s
 	if (code !== 0) process.exit(code)
 }
 
+async function runText(cmd: string, args: string[], cwd: string): Promise<string> {
+	const proc = Bun.spawn([cmd, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
+	const [stdout, stderr, code] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	])
+	if (code !== 0) {
+		const msg = stderr.trim() || stdout.trim() || `${cmd} ${args.join(' ')} failed`
+		throw new Error(msg)
+	}
+	return stdout
+}
+
+type SemverParts = [number, number, number]
+
+function parseSemverLikeTag(tag: string): { parts: SemverParts; strict: boolean } | null {
+	const raw = tag.trim()
+	if (!raw) return null
+	const t = raw.startsWith('v') ? raw.slice(1) : raw
+	const segments = t.split('.').filter(Boolean)
+	if (segments.length < 2) return null
+
+	// Accept numeric dotted tags; if there are extra numeric segments (e.g. v0.1.44.1),
+	// normalize by taking the first 3 numbers for comparison.
+	const nums: number[] = []
+	for (const seg of segments) {
+		if (!/^\d+$/.test(seg)) return null
+		nums.push(Number(seg))
+	}
+	while (nums.length < 3) nums.push(0)
+	const parts: SemverParts = [nums[0]!, nums[1]!, nums[2]!]
+	const strict = segments.length === 3
+	return { parts, strict }
+}
+
+function compareSemver(a: SemverParts, b: SemverParts): number {
+	for (let i = 0; i < 3; i++) {
+		if (a[i] !== b[i]) return a[i] - b[i]
+	}
+	return 0
+}
+
+function formatSemverTag(parts: SemverParts): string {
+	return `v${parts[0]}.${parts[1]}.${parts[2]}`
+}
+
+function bumpSemver(current: SemverParts, kind: 'patch' | 'minor' | 'major'): SemverParts {
+	const [maj, min, pat] = current
+	if (kind === 'patch') return [maj, min, pat + 1]
+	if (kind === 'minor') return [maj, min + 1, 0]
+	return [maj + 1, 0, 0]
+}
+
 async function findProjectRoot(startDir: string) {
 	let dir = path.resolve(startDir)
 	while (true) {
@@ -882,10 +942,11 @@ async function getCliVersion(): Promise<string> {
 	
 	const searchPaths = [
 		path.resolve(dir, '../../package.json'), // from src/
-		path.resolve(dir, '../../../packages/cli/package.json'), // from dist/
+		path.resolve(dir, '../packages/cli/package.json'), // from framework/dist
+		path.resolve(dir, '../framework/packages/cli/package.json'), // from repo dist
 		path.resolve(dir, 'package.json'),
 		path.join(process.cwd(), 'package.json'),
-		'/home/oti/projects/dex/packages/cli/package.json', // dev fallback
+		'/home/oti/projects/dex/framework/packages/cli/package.json', // dev fallback
 	]
 
 	for (const pkgPath of searchPaths) {
@@ -934,6 +995,46 @@ async function cmdVersion(showTemplate: boolean) {
 	}
 }
 
+async function cmdTag(kind: 'patch' | 'minor' | 'major') {
+	const git = ((Bun as any).which?.('git') as string | undefined) ?? 'git'
+	const cwd = process.cwd()
+	const tagsText = await runText(git, ['tag', '--list', 'v*'], cwd)
+	const tags = tagsText
+		.split('\n')
+		.map((s) => s.trim())
+		.filter(Boolean)
+
+	const parsed = tags
+		.map((tag) => {
+			const parsed = parseSemverLikeTag(tag)
+			return parsed ? { tag, parts: parsed.parts, strict: parsed.strict } : null
+		})
+		.filter((x): x is { tag: string; parts: SemverParts; strict: boolean } => Boolean(x))
+
+	if (parsed.length === 0) {
+		throw new Error('No version tags found (expected tags like v0.1.44)')
+	}
+
+	let current = parsed[0]!
+	for (const cand of parsed.slice(1)) {
+		const cmp = compareSemver(cand.parts, current.parts)
+		if (cmp > 0) current = cand
+		if (cmp === 0 && cand.strict && !current.strict) current = cand
+	}
+
+	const nextParts = bumpSemver(current.parts, kind)
+	const nextTag = formatSemverTag(nextParts)
+
+	console.log(`current: ${current.tag}`)
+	console.log(`next:    ${nextTag}`)
+
+	const exists = (await runText(git, ['tag', '--list', nextTag], cwd)).trim()
+	if (exists) throw new Error(`Tag already exists: ${nextTag}`)
+
+	await run(git, ['tag', nextTag], cwd)
+	await run(git, ['push', 'origin', nextTag], cwd)
+}
+
 async function main() {
 	const argv = process.argv.slice(2)
 	const { positional, flags } = parseArgs(argv)
@@ -967,6 +1068,13 @@ async function main() {
 
 		if (cmd === 'start') {
 			await cmdStart(Boolean(flags.p))
+			return
+		}
+
+		if (cmd === 'tag') {
+			const kind = positional[1]
+			if (kind !== 'patch' && kind !== 'minor' && kind !== 'major') usage(1)
+			await cmdTag(kind)
 			return
 		}
 

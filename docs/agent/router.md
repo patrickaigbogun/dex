@@ -2,10 +2,10 @@
 
 ## Source of truth
 
-- Generator: `packages/router/src/generate.ts`
-- Types: `packages/router/src/types.ts`
-- Client runtime: `packages/router/src/client/router.tsx`
-- Route helper: `packages/router/src/composeRoutes.ts`
+- Generator: `framework/packages/router/src/generate.ts`
+- Types: `framework/packages/router/src/types.ts`
+- Client runtime: `framework/packages/router/src/client/router.tsx`
+- Route helper: `framework/packages/router/src/composeRoutes.ts`
 
 ## Starter integration
 

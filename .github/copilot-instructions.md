@@ -2,10 +2,10 @@
 
 ## Big picture
 - Dex is a composable Bun-first framework repo.
-- Core packages live in `packages/`:
-  - `packages/router` (`@dex/router`): file-based router + generator + client runtime
-  - `packages/server` (`@dex/server`): Elysia helpers (assets, SPA fallback, dev reload)
-  - `packages/dev` (`@dex/dev`): small dev watch process supervisor
+- Core packages live in `framework/packages/`:
+  - `framework/packages/router` (`@dex/router`): file-based router + generator + client runtime
+  - `framework/packages/server` (`@dex/server`): Elysia helpers (assets, SPA fallback, dev reload)
+  - `framework/packages/dev` (`@dex/dev`): small dev watch process supervisor
 - Example/template app lives in `templates/starter/`.
 
 ## Template dev/build workflows
@@ -41,3 +41,7 @@ Rules:
   - `templates/**/web/public/assets/`
   - `templates/**/build/`
   - `templates/**/core/router/.generated/`
+
+## Changelog
+- Maintain an up-to-date `CHANGELOG.md` for package changes under `framework/packages/`.
+- If a change affects a package, add or update the corresponding entry in `CHANGELOG.md`.

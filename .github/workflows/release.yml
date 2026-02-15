@@ -42,13 +42,15 @@ jobs:
 
       - name: Install deps
         run: bun install
+        working-directory: framework
 
       - name: Build dex binary
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          bun build --compile ./packages/cli/src/cli.ts --outfile ./dist/dex-${{ matrix.target }}${{ matrix.ext }} --target=bun-${{ matrix.target }}
+          mkdir -p ../dist
+          bun build --compile ./packages/cli/src/cli.ts --outfile ../dist/dex-${{ matrix.target }}${{ matrix.ext }} --target=bun-${{ matrix.target }}
+        working-directory: framework
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -66,9 +68,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Install deps
-        run: bun install
 
       - name: Create template tgz
         shell: bash
@@ -112,15 +111,17 @@ jobs:
 
       - name: Install deps
         run: bun install
+        working-directory: framework
 
       - name: Create package tgz
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p ../dist
           for pkg in router server dev pie; do
-            tar -czf "dist/dex-package-${pkg}.tgz" -C packages "${pkg}"
+            tar -czf "../dist/dex-package-${pkg}.tgz" -C packages "${pkg}"
           done
+        working-directory: framework
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

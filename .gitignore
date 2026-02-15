@@ -22,7 +22,7 @@ templates/**/build/
 templates/starter/generate
 
 # cli build outputs
-packages/cli/dist/
+framework/packages/cli/dist/
 
 # private roadmap
 roadmap/

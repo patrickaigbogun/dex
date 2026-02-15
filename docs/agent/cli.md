@@ -7,7 +7,7 @@ Dex distribution is GitHub-only:
 
 ## Source
 
-- `packages/cli/src/cli.ts`
+- `framework/packages/cli/src/cli.ts`
 
 ## Commands
 

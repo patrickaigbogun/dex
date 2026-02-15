@@ -4,7 +4,7 @@ Fast references for working inside this repo.
 
 ## Key paths
 
-- Packages: `packages/*`
+- Packages: `framework/packages/*`
 - Example app/template: `templates/starter/`
 - Human docs: `docs/human/`
 

@@ -12,14 +12,21 @@ Dex is made of composable **packages** (that’s the framework), but distributio
 
 ## Repo layout
 
-- `packages/` — composable packages (framework building blocks)
+- `framework/packages/` — composable packages (framework building blocks)
 - `templates/starter/` — minimal app template using the packages
 
 ## Try the starter
 
 ```bash
+cd framework
 bun install
-cd templates/starter
+```
+
+To run the starter template locally, scaffold it into a new app:
+
+```bash
+DEX_TEMPLATE_REPO=patrickaigbogun/dex dex scaffold ./myapp --tag latest
+cd myapp
 bun run dev
 ```
 
@@ -29,10 +36,41 @@ bun run dev
 curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
 ```
 
-Scaffold the starter template:
+Windows (PowerShell):
 
-```bash
-DEX_TEMPLATE_REPO=patrickaigbogun/dex dex scaffold ./myapp --tag latest
+```powershell
+irm https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.ps1 | iex
 ```
 
-See `dist.README.md` for details.
+Pin a version:
+
+```bash
+DEX_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
+```
+
+```powershell
+$env:DEX_VERSION="v0.1.0"; irm https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.ps1 | iex
+```
+
+Install location (default `~/.local/bin`):
+
+```bash
+DEX_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | sudo bash
+```
+
+```powershell
+$env:DEX_INSTALL_DIR="$env:LOCALAPPDATA\Dex\bin"; irm https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.ps1 | iex
+```
+
+## Release assets
+
+- `dex-linux-x64`
+- `dex-linux-arm64`
+- `dex-darwin-x64`
+- `dex-darwin-arm64`
+- `dex-windows-x64.exe`
+- `dex-template-spa.tgz`
+- `dex-package-router.tgz`
+- `dex-package-server.tgz`
+- `dex-package-dev.tgz`
+- `dex-package-pie.tgz`
