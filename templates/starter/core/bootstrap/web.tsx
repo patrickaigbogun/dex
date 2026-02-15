@@ -2,8 +2,8 @@ import { createRoot } from 'react-dom/client'
 
 import { FileRouter } from '@dex/router/client'
 
-import { routes } from '../router/.generated/routes'
-import { layouts } from '../router/.generated/layouts'
+import { routes } from '@core/router/.generated/routes'
+import { layouts } from '@core/router/.generated/layouts'
 
 import GlobalLayout from '../../web/layouts/global'
 

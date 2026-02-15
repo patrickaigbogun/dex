@@ -1,10 +1,16 @@
 import { Elysia } from 'elysia'
+import { composeRoutes } from '@dex/router'
 
 import health from './health'
 
+/**
+ * Register API routes in a single compose step.
+ */
 export function apiRoutes() {
 	return <const App extends Elysia>(app: App) => {
-		// Add your own modules here (they can live in nested folders).
-		return health(app)
+		return composeRoutes(app, [
+			health,
+			// Add more routes here
+		])
 	}
 }

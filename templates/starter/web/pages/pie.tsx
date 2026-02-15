@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api.client'
+import { apiClient as api } from '@core/api'
 
 export default function PiePage() {
 	const [result, setResult] = useState<string>('loading…')

@@ -1,9 +1,13 @@
 import { spawnGroup } from '@dex/dev'
 
+/**
+ * Generate routes once before starting watchers.
+ */
 async function runGenerate() {
 	const proc = Bun.spawn(
 		[
 			'bunx',
+			'--bun',
 			'dex-router',
 			'generate',
 			'--pagesDir',
@@ -25,11 +29,13 @@ async function runGenerate() {
 
 await runGenerate()
 
+// Run parallel watchers for routes, CSS, client build, and server reloads.
 spawnGroup([
 	{
 		name: 'routes:watch',
 		cmd: [
 			'bunx',
+			'--bun',
 			'dex-router',
 			'watch',
 			'--pagesDir',
@@ -47,13 +53,13 @@ spawnGroup([
 	{
 		name: 'css:watch',
 		cmd: [
-			'bunx',
-			'@tailwindcss/cli',
+			'bun',
+			'tailwindcss',
+			'--watch',
 			'-i',
 			'web/styles/index.css',
 			'-o',
 			'web/public/assets/styles.css',
-			'--watch',
 		],
 	},
 	{
@@ -74,7 +80,7 @@ spawnGroup([
 		cmd: [
 			'bun',
 			'--watch',
-			'app.ts',
+			'core/app',
 			'--watch',
 			'./web/pages',
 			'--watch',
