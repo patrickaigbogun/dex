@@ -27,7 +27,7 @@ To run the starter template locally, scaffold it into a new app:
 ```bash
 DEX_TEMPLATE_REPO=patrickaigbogun/dex dex scaffold ./myapp --tag latest
 cd myapp
-bun run dev
+dex start
 ```
 
 ## Install `dex` (GitHub Releases)
