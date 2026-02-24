@@ -14,6 +14,6 @@
 
 ## Starter prod server
 
-- Entry: `templates/starter/core/server/prod.ts`
-- Build: `bun build --compile core/server/prod.ts --outfile build/server`
+- Entry: `templates/starter/core/runtime/server/prod.ts`
+- Build: `bun build --compile core/runtime/server/prod.ts --outfile build/server`
 - API-only: `DEX_API_ONLY=1`

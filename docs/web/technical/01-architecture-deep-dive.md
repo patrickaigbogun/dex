@@ -41,7 +41,7 @@ From `templates/starter/scripts/dev.ts`:
 
 ## Production architecture
 
-From `templates/starter/core/server/prod.ts`:
+From `templates/starter/core/runtime/server/prod.ts`:
 
 - Production app composes API routes first.
 - If assets exist, mount assets route plugin.

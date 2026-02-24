@@ -6,4 +6,5 @@ All notable changes to Dex packages will be documented here.
 
 ## Unreleased
 
-- Initial monorepo scaffold.
+- Starter template: move dev/prod server entrypoints to `core/runtime/` and rewire dev/build scripts.
+- `@dex/router`: harden `Link` against unsafe schemes, external navigation, and `_blank` tabnabbing.

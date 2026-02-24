@@ -16,6 +16,36 @@ type RouterState = RouteContext & {
 
 const RouterContext = createContext<RouterState | null>(null)
 
+function hasUnsafeScheme(to: string) {
+	const s = to.trim().toLowerCase()
+	const m = /^([a-z0-9+.-]+):/.exec(s)
+	if (!m) return false
+	return m[1] === 'javascript' || m[1] === 'data' || m[1] === 'vbscript'
+}
+
+function isExternalTo(to: string) {
+	try {
+		const url = new URL(to, window.location.origin)
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') return true
+		return url.origin !== window.location.origin
+	} catch {
+		return false
+	}
+}
+
+function normalizeRelForTargetBlank(rel: string | undefined, target: string | undefined) {
+	if (target !== '_blank') return rel
+	const tokens = new Set(
+		(rel ?? '')
+			.split(/\s+/g)
+			.map((x) => x.trim())
+			.filter(Boolean)
+	)
+	tokens.add('noopener')
+	tokens.add('noreferrer')
+	return Array.from(tokens).join(' ')
+}
+
 function normalizePathname(p: string) {
 	if (!p) return '/'
 	if (p !== '/' && p.endsWith('/')) return p.slice(0, -1)
@@ -130,15 +160,26 @@ export function useNavigate() {
  */
 export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) {
 	const navigate = useNavigate()
-	const { to, onClick, ...rest } = props
+	const { to, onClick, target, rel, ...rest } = props
+
+	const unsafe = hasUnsafeScheme(to)
+	const href = unsafe ? '#' : to
+	const finalRel = normalizeRelForTargetBlank(rel, target)
 
 	return (
 		<a
 			{...rest}
-			href={to}
+			target={target}
+			rel={finalRel}
+			href={href}
 			onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
 				onClick?.(e)
 				if (e.defaultPrevented) return
+				if (unsafe) {
+					e.preventDefault()
+					return
+				}
+				if (isExternalTo(to)) return
 				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
 				e.preventDefault()
 				navigate(to)

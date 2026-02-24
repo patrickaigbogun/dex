@@ -80,7 +80,7 @@ spawnGroup([
 		cmd: [
 			'bun',
 			'--watch',
-			'core/app',
+			'core/runtime/app',
 			'--watch',
 			'./web/pages',
 			'--watch',

@@ -74,11 +74,11 @@ Small Elysia plugins you compose into your own server.
 
 **Example (starter dev server)**
 
-See `templates/starter/core/app/index.ts`.
+See `templates/starter/core/runtime/app/index.ts`.
 
 **Example (starter production server)**
 
-See `templates/starter/core/server/prod.ts`.
+See `templates/starter/core/runtime/server/prod.ts`.
 
 ## `@dex/dev`
 

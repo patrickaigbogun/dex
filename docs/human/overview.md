@@ -60,4 +60,4 @@ DEX_API_ONLY=1 PORT=7990 ./server
 Notes:
 
 - `dexSpaFallback()` intentionally skips `/api/*`, so APIs must be mounted explicitly.
-- The production server entry is `templates/starter/core/server/prod.ts` and is compiled via `bun build --compile`.
+- The production server entry is `templates/starter/core/runtime/server/prod.ts` and is compiled via `bun build --compile`.
