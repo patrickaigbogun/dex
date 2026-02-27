@@ -12,6 +12,7 @@ type Mode = 'spa' | 'mpa'
 type DexConfig = {
 	mode?: Mode
 	port?: number
+	renderStrategy?: 'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic'
 	packageVersions?: Record<string, string>
 }
 

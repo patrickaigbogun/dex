@@ -159,7 +159,7 @@ export function useNavigate() {
  * Client-side link that routes via the FileRouter context.
  */
 export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) {
-	const navigate = useNavigate()
+	const ctx = useContext(RouterContext)
 	const { to, onClick, target, rel, ...rest } = props
 
 	const unsafe = hasUnsafeScheme(to)
@@ -179,10 +179,12 @@ export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to
 					e.preventDefault()
 					return
 				}
+				// If no router is mounted (e.g. SSG/SSR render), behave like a normal <a>.
+				if (!ctx) return
 				if (isExternalTo(to)) return
 				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
 				e.preventDefault()
-				navigate(to)
+				ctx.navigate(to)
 			}}
 		/>
 	)

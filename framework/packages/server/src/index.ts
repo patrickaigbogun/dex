@@ -145,7 +145,7 @@ export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalM
 /**
  * SPA fallback that serves the index HTML for non-asset GET requests.
  */
-export function dexSpaFallback(opts: { indexHtmlPath: string }) {
+export function dexSpaFallback(opts: { indexHtmlPath: string; ssgDir?: string }) {
 	return new Elysia().get('*', ({ request }) => {
 		if (request.method !== 'GET') return
 
@@ -157,6 +157,21 @@ export function dexSpaFallback(opts: { indexHtmlPath: string }) {
 
 		const accept = request.headers.get('accept') ?? ''
 		if (accept && !accept.includes('text/html') && !accept.includes('*/*')) return
+
+		if (opts.ssgDir) {
+			const rel = url.pathname.replace(/^\/+/, '')
+			const normalized = path.posix.normalize('/' + rel).slice(1)
+			if (normalized.startsWith('..') || normalized.includes('..')) return
+
+			const ssgIndex = normalized
+				? path.join(opts.ssgDir, normalized, 'index.html')
+				: path.join(opts.ssgDir, 'index.html')
+			try {
+				if (statSync(ssgIndex).isFile()) return Bun.file(ssgIndex)
+			} catch {
+				// ignore and fall back to SPA shell
+			}
+		}
 
 		return Bun.file(opts.indexHtmlPath)
 	})

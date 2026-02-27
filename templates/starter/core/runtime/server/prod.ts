@@ -21,6 +21,7 @@ const buildDir = exePath ? path.dirname(exePath) : process.cwd()
 
 const assetsDir = path.join(buildDir, 'assets')
 const indexHtmlPath = path.join(buildDir, 'index.html')
+const ssgDir = path.join(buildDir, '__ssg')
 
 /**
  * Production server entry for the starter template.
@@ -34,7 +35,7 @@ if (!apiOnly && existsSync(assetsDir)) {
 }
 
 if (!apiOnly && existsSync(indexHtmlPath)) {
-	app.use(dexSpaFallback({ indexHtmlPath }))
+	app.use(dexSpaFallback({ indexHtmlPath, ssgDir }))
 }
 
 const port = findAvailablePort(basePort)

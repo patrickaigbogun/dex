@@ -1,4 +1,4 @@
-import { createRoot } from 'react-dom/client'
+import { createRoot, hydrateRoot } from 'react-dom/client'
 
 import { FileRouter } from '@dex/router/client'
 
@@ -10,6 +10,10 @@ import GlobalLayout from '../../web/layouts/global'
 const el = document.getElementById('root')
 if (!el) throw new Error('Missing <div id="root"></div>')
 
-createRoot(el).render(
-	<FileRouter routes={routes} layouts={layouts} GlobalLayout={GlobalLayout} />
-)
+const tree = <FileRouter routes={routes} layouts={layouts} GlobalLayout={GlobalLayout} />
+
+if (el.hasChildNodes()) {
+	hydrateRoot(el, tree)
+} else {
+	createRoot(el).render(tree)
+}
