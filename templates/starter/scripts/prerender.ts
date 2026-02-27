@@ -57,8 +57,9 @@ async function main() {
 	const appDefault = cfg.renderStrategy ?? 'spa'
 
 	if (appDefault !== 'ssg') {
-		process.stdout.write(`ℹ prerender: renderStrategy=${appDefault}; skipping SSG\n`)
-		return
+		process.stdout.write(
+			`ℹ prerender: renderStrategy=${appDefault}; prerendering routes whose final strategy resolves to ssg\n`
+		)
 	}
 
 	const indexHtmlPath = path.join(buildDir, 'index.html')
@@ -104,10 +105,6 @@ async function main() {
 		}
 
 		const pageStrategy: RenderStrategy | undefined = pageMod?.render
-		if (pageStrategy && pageStrategy !== 'ssg') {
-			skipped++
-			continue
-		}
 
 		const layoutName = resolveLayoutName(pageMod?.layout)
 		let Layout: any
