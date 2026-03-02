@@ -97,6 +97,48 @@ A tiny process supervisor for dev.
 
 See `templates/starter/scripts/dev.ts`.
 
+## Rendering strategies (starter)
+
+Dex supports an opt-in SSG (pre-render) flow in the starter template.
+
+- App default: set `renderStrategy` in `templates/starter/dex.config.ts`.
+- Per-page override: export `render` from a page module.
+- Layout default: export `render` from a layout module.
+- Client-only islands: wrap dynamic components with `ClientOnly`.
+
+Precedence (most specific wins):
+
+- Page `export const render = ...`
+- Layout `export const render = ...`
+- App default `renderStrategy` in `dex.config.ts`
+
+Example:
+
+```ts
+// web/pages/foo.tsx
+export const render = 'ssg'
+
+import { ClientOnly } from '@dex/router/client'
+
+export default function Foo() {
+	return (
+		<ClientOnly fallback={<div />}>
+			<ExpensiveClientWidget />
+		</ClientOnly>
+	)
+}
+```
+
+Layout default example:
+
+```ts
+// web/layouts/test.tsx
+export const render = 'ssg'
+
+// web/pages/test/index.tsx
+export const layout = 'test'
+```
+
 ## `@dex/pie`
 
 **Purpose**
