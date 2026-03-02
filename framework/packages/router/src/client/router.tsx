@@ -191,33 +191,6 @@ export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to
 }
 
 /**
- * Client-only render boundary.
- *
- * Useful for SSG pages that contain “dynamic/island” components.
- * This avoids hydration mismatches by rendering `fallback` on the server
- * and on the initial client render, then switching to `children` after mount.
- */
-export function ClientOnly(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
-	const { children, fallback = null } = props
-	const [mounted, setMounted] = useState(false)
-	useEffect(() => setMounted(true), [])
-	return mounted ? <>{children}</> : <>{fallback}</>
-}
-
-/**
- * Wrap a component so it only renders on the client.
- */
-export function clientOnly<P>(Component: React.ComponentType<P>, fallback?: React.ReactNode) {
-	return function ClientOnlyWrapped(props: P) {
-		return (
-			<ClientOnly fallback={fallback}>
-				<Component {...props} />
-			</ClientOnly>
-		)
-	}
-}
-
-/**
  * Props for the file-based router runtime.
  */
 export type FileRouterProps = {

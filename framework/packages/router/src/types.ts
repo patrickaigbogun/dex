@@ -20,17 +20,6 @@ export type Metadata = {
 }
 
 /**
- * Rendering strategy for a route/layout/module.
- *
- * - `spa`: client-only (no prerender)
- * - `ssg`: pre-render at build time
- * - `ssr`: render on each request (future)
- * - `ppr`: partial pre-render (future)
- * - `dynamic`: opt-in client rendering (e.g. islands)
- */
-export type RenderStrategy = 'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic'
-
-/**
  * Layout identifier mapped from file names.
  */
 export type LayoutName = string
@@ -59,7 +48,6 @@ export type LayoutSelector = LayoutName | (() => LayoutName)
  */
 export type LayoutModule = {
 	default: (props: { children: any }) => any
-	render?: RenderStrategy
 }
 
 /**
@@ -79,7 +67,6 @@ export type PageModule = {
 	default: (props: any) => any
 	metadata?: Metadata
 	layout?: LayoutSelector
-	render?: RenderStrategy
 }
 
 /**
