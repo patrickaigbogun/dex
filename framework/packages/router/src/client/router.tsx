@@ -207,11 +207,11 @@ export function ClientOnly(props: { children: React.ReactNode; fallback?: React.
 /**
  * Wrap a component so it only renders on the client.
  */
-export function clientOnly<P>(Component: React.ComponentType<P>, fallback?: React.ReactNode) {
+export function clientOnly<P extends React.ComponentProps<any> = {}>(Component: React.ComponentType<P>, fallback?: React.ReactNode) {
 	return function ClientOnlyWrapped(props: P) {
 		return (
 			<ClientOnly fallback={fallback}>
-				<Component {...props} />
+				<Component {...(props as any)} />
 			</ClientOnly>
 		)
 	}
