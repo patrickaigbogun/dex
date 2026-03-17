@@ -1,3 +1,5 @@
+export * from './tasks'
+
 /**
  * Spawned process metadata for a managed task.
  */

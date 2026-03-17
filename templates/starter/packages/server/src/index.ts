@@ -3,6 +3,7 @@ import { statSync, watch, watchFile } from 'node:fs'
 import { Elysia } from 'elysia'
 
 export { getPublicEnvDefines } from './env'
+export * from './port'
 
 type PrettyLogLevel = 'info' | 'error'
 

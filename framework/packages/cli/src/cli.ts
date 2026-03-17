@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import crypto from 'node:crypto'
+import pkg from '../package.json'
 
 type Mode = 'spa' | 'mpa'
 
@@ -340,7 +341,8 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 
 function repoFromEnvOrFlag(flags: Record<string, string | boolean>): string {
 	const repo = (flags.repo as string | undefined) ?? process.env.DEX_TEMPLATE_REPO
-	if (!repo || typeof repo !== 'string') {
+	if (!repo) return 'patrickaigbogun/dex'
+	if (typeof repo !== 'string') {
 		throw new Error('Missing template repo. Provide --repo <owner/repo> or set DEX_TEMPLATE_REPO.')
 	}
 	if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error(`Invalid --repo format: ${repo}`)
@@ -817,7 +819,21 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 		}
 
 		const repo = repoFromEnvOrFlag(flags)
-		const tag = (flags.tag as string | undefined) ?? 'latest'
+		let tag = (flags.tag as string | undefined) ?? 'latest'
+		
+		// If tag is 'latest', resolve it to the actual version tag so we record the specific version
+		if (tag === 'latest') {
+			try {
+				const release = await githubRelease(repo, 'latest')
+				if (release.tag_name) tag = release.tag_name
+			} catch (err: any) {
+				// If we can't resolve latest (e.g. offline), we might fail later in getTemplateTgzPath
+				// or we might hit a cached 'latest' artifact if we didn't resolve.
+				// But since user wants specific version, we prefer to fail or warn?
+				// For now, let's proceed with 'latest' and let getTemplateTgzPath handle it.
+			}
+		}
+
 		try {
 			const { path: p, cache } = await getTemplateTgzPath(repo, tag, assetName)
 			process.stdout.write(`   template source: github (${repo}@${tag})\n`)
@@ -937,31 +953,7 @@ async function cmdStart(prod: boolean) {
 }
 
 async function getCliVersion(): Promise<string> {
-	// In compiled mode, try to find package.json in common locations
-	// The binary could be: /dist/dex (in repo), ~/.bun/bin/dex (installed), or wherever
-	const dir = import.meta.url ? path.dirname(import.meta.url.replace('file://', '')) : process.cwd()
-	
-	const searchPaths = [
-		path.resolve(dir, '../../package.json'), // from src/
-		path.resolve(dir, '../packages/cli/package.json'), // from framework/dist
-		path.resolve(dir, '../framework/packages/cli/package.json'), // from repo dist
-		path.resolve(dir, 'package.json'),
-		path.join(process.cwd(), 'package.json'),
-		'/home/oti/projects/dex/framework/packages/cli/package.json', // dev fallback
-	]
-
-	for (const pkgPath of searchPaths) {
-		try {
-			if (existsSync(pkgPath)) {
-				const pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
-				if (pkg.version) return pkg.version
-			}
-		} catch {
-			// ignore and try next
-		}
-	}
-
-	return 'unknown'
+	return (pkg as any).version ?? '0.1.0'
 }
 
 type DexMetadata = {

@@ -21,18 +21,23 @@
     },
     "packages/cli": {
       "name": "@dex/cli",
-      "version": "0.1.0",
       "bin": {
         "dex": "./bin/dex.js",
       },
     },
     "packages/dev": {
       "name": "@dex/dev",
-      "version": "0.1.0",
+      "devDependencies": {
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+      },
+      "peerDependencies": {
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
+      },
     },
     "packages/pie": {
       "name": "@dex/pie",
-      "version": "0.1.0",
       "dependencies": {
         "@elysiajs/eden": "^1.4.6",
       },
@@ -42,7 +47,6 @@
     },
     "packages/router": {
       "name": "@dex/router",
-      "version": "0.1.0",
       "bin": {
         "dex-router": "./bin/dex-router.js",
       },
@@ -53,7 +57,6 @@
     },
     "packages/server": {
       "name": "@dex/server",
-      "version": "0.1.0",
       "dependencies": {
         "elysia": "^1.4.21",
       },
@@ -333,6 +336,8 @@
     "whatwg-url": ["whatwg-url@5.0.0", "", { "dependencies": { "tr46": "~0.0.3", "webidl-conversions": "^3.0.0" } }, "sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw=="],
 
     "which": ["which@2.0.2", "", { "dependencies": { "isexe": "^2.0.0" }, "bin": { "node-which": "./bin/node-which" } }, "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="],
+
+    "@dex/dev/@types/react": ["@types/react@19.2.14", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w=="],
 
     "@manypkg/find-root/@types/node": ["@types/node@12.20.55", "", {}, "sha512-J8xLz7q2OFulZ2cyGTLE1TbbZcjpno7FaN6zdJNrgAdrJ+DZzh/uFR6YrTb4C+nXakvud8Q4+rbhoIWlYQbUFQ=="],
 

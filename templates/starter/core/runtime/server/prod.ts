@@ -3,9 +3,8 @@ import path from 'node:path'
 
 import { Elysia } from 'elysia'
 
-import { dexAssetsRoute, dexPrettyLogger, dexSpaFallback } from '@dex/server'
+import { dexAssetsRoute, dexPrettyLogger, dexSpaFallback, findAvailablePort } from '@dex/server'
 import { apiRoutes } from '../../../routes/api'
-import { findAvailablePort } from '../../../utils/port'
 
 const basePort = Number(process.env.PORT ?? 7990)
 if (!Number.isFinite(basePort) || basePort <= 0) throw new Error(`Invalid PORT: ${process.env.PORT}`)
