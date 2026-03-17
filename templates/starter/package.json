@@ -10,7 +10,7 @@
     "prepare:build": "bun scripts/prepare-build.ts",
     "prerender": "bun scripts/prerender.ts",
     "build:css": "bun tailwindcss -i web/styles/index.css -o build/assets/styles.css --minify",
-    "build:client": "bun build core/bootstrap/web.tsx --target browser --minify --outfile build/assets/client.js",
+    "build:client": "bun scripts/build-client.ts",
     "build:server": "bun build --compile core/runtime/server/prod.ts --outfile build/server",
     "build": "bun run generate && bun run prepare:build && bun run prerender && bun run build:css && bun run build:client && bun run build:server",
     "dev": "bun scripts/dev.ts",

@@ -1,5 +1,5 @@
 import pie from '@dex/pie'
-import type { Api } from './index'
+import type { Api } from './type'
 
 /**
  * Resolve the base URL for browser API calls.

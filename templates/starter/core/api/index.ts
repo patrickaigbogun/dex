@@ -1,16 +1,15 @@
-import { Elysia } from 'elysia'
-import { apiRoutes } from '../../routes/api'
+import type { Api } from './type'
+import { api } from './server'
 
 /**
- * API app used for server routes and client typing.
+ * Server API instance.
  */
-export const api = new Elysia().use(apiRoutes())
+export { api }
 
 /**
- * API type consumed by the typed client.
+ * API type inferred from the server instance.
  */
-export type Api = typeof api;
-// const health = api['~Routes'].health.get.response[200]
+export type { Api }
 
 /**
  * Typed API client instance for browser usage.

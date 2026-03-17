@@ -2,6 +2,8 @@ import path from 'node:path'
 import { statSync, watch, watchFile } from 'node:fs'
 import { Elysia } from 'elysia'
 
+export { getPublicEnvDefines } from './env'
+
 type PrettyLogLevel = 'info' | 'error'
 
 /**

@@ -9,7 +9,7 @@ export default function PiePage() {
 
 		;(async () => {
 			try {
-				const res = await api.health.get()
+				const res = await api.v1.health.get()
 				if (cancelled) return
 				setResult(JSON.stringify(res, null, 2))
 			} catch (err) {

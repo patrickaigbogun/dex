@@ -1,4 +1,5 @@
 import { spawnGroup } from '@dex/dev'
+import { getPublicEnvDefines } from '@dex/server'
 
 /**
  * Generate routes once before starting watchers.
@@ -73,6 +74,7 @@ spawnGroup([
 			'--outfile',
 			'web/public/assets/client.js',
 			'--watch',
+			...getPublicEnvDefines(),
 		],
 	},
 	{
