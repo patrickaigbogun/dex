@@ -11,9 +11,10 @@
     "isolatedModules": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "baseUrl": ".",
+    // "baseUrl": ".",
     "paths": {
-      "@core/*": ["core/*"]
+      "@/*": ["./*"],
+      "@core/*": ["./core/*"]
     }
   },
   "include": [
