@@ -1,8 +1,10 @@
 import { spawnGroup } from './index'
-import { mkdir, rm, copyFile, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, rm, copyFile, readFile, writeFile, cp as fsCp } from 'node:fs/promises'
 import path from 'node:path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
+
+const ENTRY_NAMING = 'client.[ext]'
 
 export type DexTaskOptions = {
 	rootDir: string
@@ -192,7 +194,13 @@ export async function dexPrerender({ rootDir }: DexPrerenderOptions) {
 	}
 
 	const indexHtmlPath = path.join(buildDir, 'index.html')
-	const indexHtml = await readFile(indexHtmlPath, 'utf8')
+	let indexHtml: string
+	try {
+		indexHtml = await readFile(indexHtmlPath, 'utf8')
+	} catch (e) {
+		console.warn(`prerender: missing build/index.html at ${indexHtmlPath}; skipping prerender`)
+		return
+	}
 
 	const routesMod: any = await import(path.join(rootDir, 'core/router/.generated/routes.ts') + `?t=${Date.now()}`)
 	const layoutsMod: any = await import(path.join(rootDir, 'core/router/.generated/layouts.ts') + `?t=${Date.now()}`)
@@ -315,10 +323,17 @@ export async function dexPrerender({ rootDir }: DexPrerenderOptions) {
     // SSG files need to be in `build/` root to be served as static files by typical servers.
     // I'll add a step to copy them.
     
-    // Copy ssgDir contents to buildDir
-    // Recursive copy... node:fs cp is experimental?
-    // `cp -r` via bun spawn is easier.
-    const cp = Bun.spawn(['cp', '-r', ssgDir + '/.', buildDir], { stdout: 'ignore' })
-    await cp.exited
-    await rm(ssgDir, { recursive: true, force: true })
+	// Copy ssgDir contents to buildDir. Prefer native fs.cp when available.
+	try {
+		if (typeof fsCp === 'function') {
+			await fsCp(ssgDir + '/.', buildDir, { recursive: true, force: true })
+		} else {
+			throw new Error('fs.cp not available')
+		}
+	} catch (e) {
+		// Fallback to shell copy for environments where fs.cp isn't available.
+		const cpProc = Bun.spawn(['cp', '-r', ssgDir + '/.', buildDir], { stdout: 'ignore', stderr: 'inherit' })
+		await cpProc.exited
+	}
+	await rm(ssgDir, { recursive: true, force: true })
 }

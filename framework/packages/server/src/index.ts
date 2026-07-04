@@ -1,9 +1,42 @@
 import path from 'node:path'
-import { statSync, watch, watchFile } from 'node:fs'
+import { statSync, watch, watchFile, existsSync } from 'node:fs'
 import { Elysia } from 'elysia'
 
-export { getPublicEnvDefines } from './env'
-export * from './port'
+const CONFIG_FILENAMES = ['dex.config.ts', 'dex.config.js', 'dex.config.mjs', 'dex.config.cjs']
+
+async function loadProjectRootAndConfig() {
+	let dir = path.resolve(process.cwd())
+	const seen = new Set<string>()
+
+	while (!seen.has(dir)) {
+		seen.add(dir)
+		for (const filename of CONFIG_FILENAMES) {
+			const candidate = path.join(dir, filename)
+			if (existsSync(candidate)) {
+				try {
+					const mod = await import(candidate)
+					const cfg = mod.default ?? mod ?? {}
+					return { root: dir, config: cfg }
+				} catch {}
+			}
+		}
+		const parent = path.dirname(dir)
+		if (parent === dir) break
+		dir = parent
+	}
+	return { root: path.resolve(process.cwd()), config: {} as any }
+}
+
+const { root: projectRoot, config: dexConfig } = await loadProjectRootAndConfig()
+
+const DEFAULT_DEV_WATCH_FILES = [
+	'web/public/assets/client.js',
+	'web/public/assets/styles.css',
+].map((p) => path.resolve(projectRoot, p))
+
+const DEFAULT_DEV_WATCH_DIRS = [
+	'web/public/assets',
+].map((p) => path.resolve(projectRoot, p))
 
 type PrettyLogLevel = 'info' | 'error'
 
@@ -40,11 +73,42 @@ type SSEClient = {
 
 /**
  * Dev-only SSE endpoint for triggering a client reload.
+ *
+ * Resolution order for watch paths:
+ *   1. Values passed in opts (highest)
+ *   2. Values from dex.config.* (nearest to cwd, using its dir as project root)
+ *   3. Built-in defaults (web/public/assets/* resolved relative to project root)
+ *
+ * Always has a fallback. Paths are relative to the dex.config location.
  */
-export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalMs?: number }) {
+function resolveList(base: string, list?: string[]) {
+	if (!list || list.length === 0) return []
+	return list.map((p) => path.resolve(base, p))
+}
+
+export function dexDevReloadRouter(opts?: {
+	watchFiles?: string[]
+	watchDirs?: string[]
+	pollIntervalMs?: number
+}) {
 	const isProd = process.env.NODE_ENV === 'production'
 	const pollIntervalMs = opts?.pollIntervalMs ?? 250
-	const watchFiles = opts?.watchFiles ?? ['web/public/assets/client.js', 'web/public/assets/styles.css']
+
+	// Precedence: explicit opts > values from dex.config > defaults (all relative to project root from config location)
+	const configWatchFiles = (dexConfig as any)?.watchFiles ?? (dexConfig as any)?.devWatchFiles
+	const configWatchDirs = (dexConfig as any)?.watchDirs ?? (dexConfig as any)?.devWatchDirs
+
+	const fromUserFiles = resolveList(projectRoot, opts?.watchFiles)
+	const fromConfigFiles = resolveList(projectRoot, configWatchFiles)
+	const watchFiles = fromUserFiles.length > 0
+		? fromUserFiles
+		: (fromConfigFiles.length > 0 ? fromConfigFiles : DEFAULT_DEV_WATCH_FILES)
+
+	const fromUserDirs = resolveList(projectRoot, opts?.watchDirs)
+	const fromConfigDirs = resolveList(projectRoot, configWatchDirs)
+	const watchDirs = fromUserDirs.length > 0
+		? fromUserDirs
+		: (fromConfigDirs.length > 0 ? fromConfigDirs : DEFAULT_DEV_WATCH_DIRS)
 
 	const sseClients = new Set<SSEClient>()
 	let devWatcherStarted = false
@@ -72,17 +136,19 @@ export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalM
 		if (isProd || devWatcherStarted) return
 		devWatcherStarted = true
 
-		// Directory watch (best effort)
-		try {
-			watch('web/public/assets', (_event, filename) => {
-				if (typeof filename !== 'string') {
-					broadcastReload()
-					return
-				}
-				if (filename.endsWith('.js') || filename.endsWith('.css')) broadcastReload()
-			})
-		} catch {
-			// ignore
+		// Directory watches - only from explicit or defaults (no hard-coded strings)
+		for (const dir of watchDirs) {
+			try {
+				watch(dir, (_event, filename) => {
+					if (typeof filename !== 'string') {
+						broadcastReload()
+						return
+					}
+					if (filename.endsWith('.js') || filename.endsWith('.css')) broadcastReload()
+				})
+			} catch {
+				// ignore
+			}
 		}
 
 		for (const file of watchFiles) {
@@ -93,7 +159,7 @@ export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalM
 			}
 		}
 
-		if (!devPollStarted) {
+		if (!devPollStarted && watchFiles.length > 0) {
 			devPollStarted = true
 			for (const file of watchFiles) {
 				try {
@@ -148,7 +214,7 @@ export function dexDevReloadRouter(opts?: { watchFiles?: string[]; pollIntervalM
 /**
  * SPA fallback that serves the index HTML for non-asset GET requests.
  */
-export function dexSpaFallback(opts: { indexHtmlPath: string; ssgDir?: string }) {
+export function dexSpaFallback(opts: { indexHtmlPath: string }) {
 	return new Elysia().get('*', ({ request }) => {
 		if (request.method !== 'GET') return
 
@@ -160,21 +226,6 @@ export function dexSpaFallback(opts: { indexHtmlPath: string; ssgDir?: string })
 
 		const accept = request.headers.get('accept') ?? ''
 		if (accept && !accept.includes('text/html') && !accept.includes('*/*')) return
-
-		if (opts.ssgDir) {
-			const rel = url.pathname.replace(/^\/+/, '')
-			const normalized = path.posix.normalize('/' + rel).slice(1)
-			if (normalized.startsWith('..') || normalized.includes('..')) return
-
-			const ssgIndex = normalized
-				? path.join(opts.ssgDir, normalized, 'index.html')
-				: path.join(opts.ssgDir, 'index.html')
-			try {
-				if (statSync(ssgIndex).isFile()) return Bun.file(ssgIndex)
-			} catch {
-				// ignore and fall back to SPA shell
-			}
-		}
 
 		return Bun.file(opts.indexHtmlPath)
 	})

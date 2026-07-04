@@ -10,12 +10,13 @@
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./types/index.d.ts",
       "default": "./src/index.ts"
     }
   },
   "files": [
     "src",
+    "types",
     "bin",
     "dist"
   ]
