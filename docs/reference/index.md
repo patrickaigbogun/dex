@@ -7,6 +7,7 @@ Detailed API and configuration references.
 - [CLI Flags](./cli-flags) — Command-line options
 - [Config Schema](./config-schema) — `dex.config.ts` options
 - [Server Exports](./server-exports) — `@dex/server` API
+- [Dev Reference](./dev-reference) — Dev utilities API
 - [File Conventions](./file-conventions) — Naming and structure rules
 
 ## Quick Links
