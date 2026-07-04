@@ -10,7 +10,8 @@
     "version": "bunx changeset version",
     "release": "bunx changeset publish",
     "typecheck": "bunx tsc -p tsconfig.json --noEmit",
-    "build:types": "bunx tsc -p packages/router/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/server/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/pie/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/dev/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/cli/tsconfig.types.json --emitDeclarationOnly"
+    "build:types": "bunx tsc -p packages/router/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/server/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/pie/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/dev/tsconfig.types.json --emitDeclarationOnly && bunx tsc -p packages/cli/tsconfig.types.json --emitDeclarationOnly",
+    "prepare": "bun run build:types"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.6",
