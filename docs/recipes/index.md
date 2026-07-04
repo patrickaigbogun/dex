@@ -8,6 +8,7 @@ Real-world solutions for common Dex use cases.
 - [Monorepo Setup](./monorepo) — Use Dex in a monorepo with other packages
 - [API-Only Deployment](./api-only-deploy) — Deploy backend without frontend
 - [Static Site Generation](./static-generation) — Pre-render pages at build time
+- [Environment-Specific Config](./environment-config) — Configure for dev/production
 
 ## Need Help?
 
