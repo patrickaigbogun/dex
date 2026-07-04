@@ -30,4 +30,10 @@ Welcome to Dex documentation. Start here to learn the framework.
 
 - [CLI Flags](./reference/cli-flags) — Command-line options
 - [Config Schema](./reference/config-schema) — Configuration reference
-- [File Conventions](./reference/file-conceptions) — Naming rules
+- [File Conventions](./reference/file-conventions) — Naming rules
+
+## Full Documentation
+
+- [CLI](./cli/) — Scaffolding, commands
+- [Deployment](./deployment/) — Production deployment
+- [Troubleshooting](./troubleshooting/) — Common issues

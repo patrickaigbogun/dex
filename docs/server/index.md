@@ -7,6 +7,7 @@ Dex's server handles asset serving, SPA fallback, and production deployment.
 - [Serving Assets](./serving-assets) — Static file serving
 - [SPA Fallback](./spa-fallback) — Client-side routing support
 - [Dev Reload](./dev-reload) — Hot reload in development
+- [Logging](./logging) — Request logs and output
 - [Production](./production) — Running in production
 
 ## Quick Start
