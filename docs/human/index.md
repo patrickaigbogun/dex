@@ -10,6 +10,7 @@ The goal is a composable development environment: each capability lives in a pac
 - Concepts (packages + philosophy): `docs/human/concepts.md`
 - Packages (how to use each): `docs/human/packages.md`
 - Starter template guide: `docs/human/starter-template.md`
+- Configuration & custom paths: `docs/human/config-driven-paths.md`
 
 ## If you’re a code agent
 

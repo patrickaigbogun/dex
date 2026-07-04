@@ -2,6 +2,8 @@ import { readdir, mkdir } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import path from 'node:path'
 
+import { DEFAULT_PATHS, loadDexConfig, resolveFromRoot } from './config'
+
 type RouteSegment =
 	| { kind: 'static'; value: string }
 	| { kind: 'param'; name: string }
@@ -96,8 +98,13 @@ export async function generateLayouts(opts?: {
 	layoutsDir?: string
 	outTs?: string
 }) {
-	const layoutsDirAbs = path.resolve(opts?.layoutsDir ?? './web/layouts')
-	const outTsAbs = path.resolve(opts?.outTs ?? './core/router/.generated/layouts.ts')
+	const { config, root } = await loadDexConfig()
+
+	const layoutsDirInput = opts?.layoutsDir ?? config.layoutsDir ?? DEFAULT_PATHS.layoutsDir
+	const outTsInput = opts?.outTs ?? config.outLayoutsTs ?? DEFAULT_PATHS.outLayoutsTs
+
+	const layoutsDirAbs = resolveFromRoot(root, layoutsDirInput)
+	const outTsAbs = resolveFromRoot(root, outTsInput)
 
 	const filesAbs = (await walkIfExists(layoutsDirAbs)).filter(isLayoutModuleFile)
 
@@ -120,7 +127,7 @@ export async function generateLayouts(opts?: {
 
 	await mkdir(path.dirname(outTsAbs), { recursive: true })
 
-	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(process.cwd(), layoutsDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { LayoutModule } from '@dex/router'\n\nexport const layouts: Record<string, () => Promise<LayoutModule>> = {\n${layouts
+	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(root, layoutsDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { LayoutModule } from '@dex/router'\n\nexport const layouts: Record<string, () => Promise<LayoutModule>> = {\n${layouts
 		.map((l) => `  ${JSON.stringify(l.name)}: () => import(${JSON.stringify(l.importPath)}),`)
 		.join('\n')}\n}\n`
 
@@ -135,9 +142,15 @@ export async function generateFsRoutes(opts?: {
 	outTs?: string
 	outJson?: string
 }) {
-	const pagesDirAbs = path.resolve(opts?.pagesDir ?? './web/pages')
-	const outTsAbs = path.resolve(opts?.outTs ?? './core/router/.generated/routes.ts')
-	const outJsonAbs = path.resolve(opts?.outJson ?? './core/router/.generated/manifest.json')
+	const { config, root } = await loadDexConfig()
+
+	const pagesDirInput = opts?.pagesDir ?? config.pagesDir ?? DEFAULT_PATHS.pagesDir
+	const outTsInput = opts?.outTs ?? config.outRoutesTs ?? DEFAULT_PATHS.outRoutesTs
+	const outJsonInput = opts?.outJson ?? config.outRoutesJson ?? DEFAULT_PATHS.outRoutesJson
+
+	const pagesDirAbs = resolveFromRoot(root, pagesDirInput)
+	const outTsAbs = resolveFromRoot(root, outTsInput)
+	const outJsonAbs = resolveFromRoot(root, outJsonInput)
 
 	const filesAbs = (await walk(pagesDirAbs)).filter((f) => f.endsWith('.tsx'))
 
@@ -159,7 +172,7 @@ export async function generateFsRoutes(opts?: {
 
 	await mkdir(path.dirname(outTsAbs), { recursive: true })
 
-	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(process.cwd(), pagesDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { Route } from '@dex/router'\n\nexport const routes: Route[] = [\n${routes
+	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(root, pagesDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { Route } from '@dex/router'\n\nexport const routes: Route[] = [\n${routes
 		.map(
 			(r) => `  {\n    file: ${JSON.stringify(r.file)},\n    path: ${JSON.stringify(r.path)},\n    segments: ${JSON.stringify(r.segments)},\n    importPage: () => import(${JSON.stringify(r.importPath)}),\n  }`
 		)
@@ -167,7 +180,7 @@ export async function generateFsRoutes(opts?: {
 
 	const json = JSON.stringify(
 		{
-			source: toPosix(path.relative(process.cwd(), pagesDirAbs)),
+			source: toPosix(path.relative(root, pagesDirAbs)),
 			generatedAt: new Date().toISOString(),
 			routes: routes.map(({ file, path, segments }) => ({ file, path, segments })),
 		},
@@ -194,8 +207,13 @@ export async function watchAndGenerate(opts?: {
 	let needsRerun = false
 	const watchers = new Map<string, ReturnType<typeof watch>>()
 
-	const pagesRoot = path.resolve(opts?.pagesDir ?? './web/pages')
-	const layoutsRoot = path.resolve(opts?.layoutsDir ?? './web/layouts')
+	const { config, root } = await loadDexConfig()
+
+	const pagesDirInput = opts?.pagesDir ?? config.pagesDir ?? DEFAULT_PATHS.pagesDir
+	const layoutsDirInput = opts?.layoutsDir ?? config.layoutsDir ?? DEFAULT_PATHS.layoutsDir
+
+	const pagesRoot = resolveFromRoot(root, pagesDirInput)
+	const layoutsRoot = resolveFromRoot(root, layoutsDirInput)
 
 	const ensureWatched = async () => {
 		const seen = new Set<string>()

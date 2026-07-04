@@ -5,7 +5,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 
 ---
 
-## Phase 1: Core Modularity & Testing (Q3 2026)
+## Phase 1: Core Modularity & Testing
 
 ### CLI Modularization
 - [ ] Refactor `framework/packages/cli` into independent, composable modules
@@ -35,7 +35,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 
 ---
 
-## Phase 2: Developer Experience & Templates (Q4 2026)
+## Phase 2: Developer Experience & Templates
 
 ### Example Templates
 - [ ] **`templates/with-validation`** — showcase default validation system integration
@@ -61,7 +61,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 
 ---
 
-## Phase 3: Deployment & Production Readiness (2027 Q1)
+## Phase 3: Deployment & Production Readiness
 
 ### Deployment Guides & CLI Commands
 - [ ] Write deployment guides for:
@@ -84,7 +84,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 
 ---
 
-## Phase 4: Performance & Benchmarks (2027 Q2)
+## Phase 4: Performance & Benchmarks
 
 ### Benchmarking Suite
 - [ ] **Route generation:** benchmark 1k+ page site generation time
@@ -101,7 +101,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 
 ---
 
-## Phase 5: CLI Port to Go (2027 Q3+)
+## Phase 5: CLI Port to Go
 
 ### Go CLI Implementation
 - [ ] Prototype Go-based CLI (`dex-cli-go`)

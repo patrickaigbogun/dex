@@ -7,20 +7,21 @@
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./types/index.d.ts",
       "default": "./src/index.ts"
     },
     "./generate": {
-      "types": "./src/generate.ts",
+      "types": "./types/generate.d.ts",
       "default": "./src/generate.ts"
     },
     "./client": {
-      "types": "./src/client/router.tsx",
+      "types": "./types/client/router.d.ts",
       "default": "./src/client/router.tsx"
     }
   },
   "files": [
     "src",
+    "types",
     "bin"
   ],
   "peerDependencies": {

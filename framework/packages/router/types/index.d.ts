@@ -1,0 +1,5 @@
+export type * from './types';
+export { generateFsRoutes, generateLayouts, watchAndGenerate } from './generate';
+export { composeRoutes } from './composeRoutes';
+export type { DexConfig } from './config';
+export { loadDexConfig, DEFAULT_PATHS } from './config';
