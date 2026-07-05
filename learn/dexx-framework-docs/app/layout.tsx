@@ -1,10 +1,17 @@
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import './global.css';
 import { Inter } from 'next/font/google';
+import type { Metadata } from 'next';
+
+const baseUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL!);
 
 const inter = Inter({
   subsets: ['latin'],
 });
+
+export const metadata: Metadata = {
+  metadataBase: baseUrl,
+};
 
 export default function Layout({ children }: LayoutProps<'/'>) {
   return (
