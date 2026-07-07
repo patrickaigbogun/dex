@@ -25,7 +25,7 @@ templates/starter/generate
 framework/packages/cli/dist/
 
 # private roadmap
-roadmap/
+roadmap/*
 
 # package manager locks
 package-lock.json
