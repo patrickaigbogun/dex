@@ -15,6 +15,10 @@ type DexConfig = {
 	port?: number
 	renderStrategy?: 'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic'
 	packageVersions?: Record<string, string>
+	apiSpec?: string
+	apiUrl?: string
+	outApiTs?: string
+	apiPrefix?: string
 }
 
 const DEFAULT_PACKAGES = ['router', 'server', 'dev', 'pie']
@@ -29,6 +33,12 @@ Usage:
 	dex tag <patch|minor|major>
   dex build
   dex start [-p]
+  dex pie generate [spec-url-or-file] [--out <path>] [--prefix <prefix>]
+
+Pie options:
+  --out <path>               Output file path (default: core/api/generated.ts)
+  --prefix <prefix>          Path prefix to strip from route tree (default: /api)
+  --url <baseUrl>            Default API base URL (default from dex.config or env)
 
 Scaffold options:
   --repo <owner/repo>        GitHub repo containing release templates
@@ -1028,6 +1038,62 @@ async function cmdTag(kind: 'patch' | 'minor' | 'major') {
 	await run(git, ['push', 'origin', nextTag], cwd)
 }
 
+async function cmdPieGenerate(positional: string[], flags: Record<string, string | boolean>) {
+	const step = createSteps()
+
+	const found = await step('Locate project', async () => {
+		const proj = await findProjectRoot(process.cwd())
+		if (!proj) throw new Error('Not in a Dex project (missing dex.config.*)')
+		return proj
+	})
+
+	const cfg = await loadDexConfig(found)
+
+	const spec =
+		(positional[2] as string | undefined) ??
+		(flags.spec as string | undefined) ??
+		cfg.apiSpec ??
+		process.env.DEX_API_SPEC
+
+	if (!spec) {
+		throw new Error(
+			'Missing OpenAPI spec. Provide spec URL/path: dex pie generate <url-or-path>, or set `apiSpec` in dex.config.ts'
+		)
+	}
+
+	const outTs =
+		(flags.out as string | undefined) ??
+		(flags.outTs as string | undefined) ??
+		cfg.outApiTs ??
+		'core/api/generated.ts'
+
+	const prefix =
+		(flags.prefix as string | undefined) ??
+		cfg.apiPrefix ??
+		'/api'
+
+	const defaultBaseUrl =
+		(flags.url as string | undefined) ??
+		cfg.apiUrl ??
+		process.env.PUBLIC_API_URL ??
+		process.env.NEXT_PUBLIC_API_URL ??
+		''
+
+	const { generateApi } = await import('@dex/pie/generator')
+
+	const generatedPath = await step('Generate API client from OpenAPI', async () => {
+		return await generateApi({
+			spec,
+			outTs,
+			root: found.root,
+			prefix,
+			defaultBaseUrl,
+		})
+	})
+
+	console.log(`\nGenerated typed API route tree: ${path.relative(found.root, generatedPath)} ✓`)
+}
+
 async function main() {
 	const argv = process.argv.slice(2)
 	const { positional, flags } = parseArgs(argv)
@@ -1069,6 +1135,15 @@ async function main() {
 			if (kind !== 'patch' && kind !== 'minor' && kind !== 'major') usage(1)
 			await cmdTag(kind)
 			return
+		}
+
+		if (cmd === 'pie' || cmd === 'api') {
+			const sub = positional[1]
+			if (!sub || sub === 'generate') {
+				await cmdPieGenerate(positional, flags)
+				return
+			}
+			usage(1)
 		}
 
 		console.error(`Unknown command: ${cmd}`)
