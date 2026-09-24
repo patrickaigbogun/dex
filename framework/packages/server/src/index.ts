@@ -54,8 +54,12 @@ export function dexAssetsRoute(opts: {
 
 	return new Elysia().get('/assets/*', ({ request, set }) => {
 		const url = new URL(request.url)
-		const rel = url.pathname.replace(/^\/assets\//, '')
-		const normalized = path.posix.normalize('/' + rel).slice(1)
+		const rawRel = url.pathname.replace(/^\/assets\//, '')
+		let decoded = rawRel
+		try {
+			decoded = decodeURIComponent(rawRel)
+		} catch {}
+		const normalized = path.posix.normalize('/' + decoded).slice(1)
 		if (!normalized || normalized.startsWith('..') || normalized.includes('..')) {
 			set.status = 400
 			return 'Bad asset path'
@@ -215,17 +219,28 @@ export function dexDevReloadRouter(opts?: {
  * SPA fallback that serves the index HTML for non-asset GET requests.
  */
 export function dexSpaFallback(opts: { indexHtmlPath: string }) {
-	return new Elysia().get('*', ({ request }) => {
-		if (request.method !== 'GET') return
+	return new Elysia().get('*', ({ request, set }) => {
+		if (request.method !== 'GET') {
+			set.status = 405
+			return 'Method Not Allowed'
+		}
 
 		const url = new URL(request.url)
-		if (url.pathname.startsWith('/api/')) return
-		if (url.pathname.startsWith('/assets/')) return
-		if (url.pathname.startsWith('/__dev/')) return
-		if (url.pathname.includes('.')) return
+		if (
+			url.pathname.startsWith('/api/') ||
+			url.pathname.startsWith('/assets/') ||
+			url.pathname.startsWith('/__dev/') ||
+			url.pathname.includes('.')
+		) {
+			set.status = 404
+			return 'Not Found'
+		}
 
 		const accept = request.headers.get('accept') ?? ''
-		if (accept && !accept.includes('text/html') && !accept.includes('*/*')) return
+		if (accept && !accept.includes('text/html') && !accept.includes('*/*')) {
+			set.status = 404
+			return 'Not Found'
+		}
 
 		return Bun.file(opts.indexHtmlPath)
 	})
@@ -296,3 +311,7 @@ export function dexPrettyLogger(opts?: {
 				console.error(error)
 			})
 }
+
+export * from './env'
+export * from './port'
+

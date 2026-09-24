@@ -135,6 +135,7 @@ export declare function dexSpaFallback(opts: {
             query: unknown;
             headers: unknown;
             response: {
+                200: Bun.BunFile | "Method Not Allowed" | "Not Found";
                 422: {
                     type: "validation";
                     on: string;
