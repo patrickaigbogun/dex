@@ -37,7 +37,7 @@ if (!apiOnly && existsSync(indexHtmlPath)) {
 	app.use(dexSpaFallback({ indexHtmlPath, ssgDir }))
 }
 
-const port = await findAvailablePort(basePort)
+const port = findAvailablePort(basePort)
 if (port !== basePort) {
 	console.log(`Port ${basePort} is in use. Using ${port} instead.`)
 }

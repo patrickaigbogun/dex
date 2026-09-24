@@ -1,38 +1,21 @@
 {
   "name": "@dex/pie",
-  "version": "0.2.1",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
   "exports": {
     ".": {
-      "types": "./types/index.d.ts",
+      "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./generator": {
-      "types": "./types/generator.d.ts",
-      "default": "./src/generator.ts"
-    },
-    "./treaty": {
-      "types": "./types/treaty.d.ts",
-      "default": "./src/treaty.ts"
     }
   },
   "files": [
-    "src",
-    "types"
+    "src"
   ],
   "dependencies": {
     "@elysiajs/eden": "^1.4.6"
   },
   "peerDependencies": {
     "elysia": "^1.4.21"
-  },
-  "peerDependenciesMeta": {
-    "elysia": {
-      "optional": true
-    },
-    "@elysiajs/eden": {
-      "optional": true
-    }
   }
 }

@@ -252,6 +252,22 @@ async function fetchTemplateDiff(repo: string, tag: string): Promise<TemplateDif
 }
 
 async function cmdSync(flags: Record<string, string | boolean>) {
+	if (flags.h || flags.help) {
+		console.log(`
+Usage: dex sync [options]
+
+Sync files from upstream template release to update your project.
+
+Options:
+  --tag <tag>         Target release tag to sync to (default: latest)
+  --interactive       Interactively select which changed files to sync
+  --force             Force sync even if project is already on the target version
+  --repo <repo>       GitHub repo (default: patrickaigbogun/dex)
+  -h, --help          Show help
+`)
+		return
+	}
+
 	const step = createSteps()
 
 	const found = await step('Locate project', async () => {
@@ -275,20 +291,31 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 		return meta
 	})
 
-	const repo = (flags.repo as string | undefined) ?? (metadata as any)?.repo ?? process.env.DEX_TEMPLATE_REPO
-	if (!repo) throw new Error('Missing repo. Provide --repo <owner/repo> or set DEX_TEMPLATE_REPO')
+	const repo = repoFromEnvOrFlag(flags)
+	const currentTag = metadata.version || metadata.releaseTag || null
 
-	let tag = (flags.tag as string | undefined) ?? (metadata as any)?.releaseTag
-	if (!tag) {
-		process.stdout.write(`\n⚠ No --tag provided. Fetching latest release...\n`)
-		tag = await getLatestReleaseTag(repo)
-		if (!tag) throw new Error('Could not determine latest release tag')
-		process.stdout.write(`ℹ Using tag: ${tag}\n`)
+	let targetTag = (flags.tag as string | undefined) ?? (flags.to as string | undefined)
+	if (!targetTag || targetTag === 'latest') {
+		targetTag = await step('Fetch latest release info', async () => {
+			const rel = await getLatestReleaseTag(repo)
+			if (!rel) throw new Error(`Could not determine latest release tag for ${repo}`)
+			return rel
+		})
 	}
 
-	const diff = await step('Fetch template diff', async () => {
-		const d = await fetchTemplateDiff(repo, tag)
-		if (!d) throw new Error(`Diff not found for ${repo}@${tag}`)
+	if (!targetTag.startsWith('v') && /^\d+\.\d+\.\d+/.test(targetTag)) {
+		targetTag = `v${targetTag}`
+	}
+
+	if (currentTag === targetTag && !flags.force) {
+		console.log(`\nProject is already up to date with template ${targetTag} (latest) ✓`)
+		console.log(`Use \`dex sync --force\` to re-sync files.`)
+		return
+	}
+
+	const diff = await step(`Fetch template diff (${targetTag})`, async () => {
+		const d = await fetchTemplateDiff(repo, targetTag)
+		if (!d) throw new Error(`Diff not found for ${repo}@${targetTag}`)
 		return d
 	})
 
@@ -316,7 +343,7 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 
 	await step('Download and sync template', async () => {
 		const templateAsset = 'dex-template-spa.tgz'
-		const { path: tgzPath } = await getTemplateTgzPath(repo, tag, templateAsset)
+		const { path: tgzPath } = await getTemplateTgzPath(repo, targetTag, templateAsset)
 
 		const tempExtractDir = path.join(os.tmpdir(), `dex-sync-${Date.now()}`)
 		await mkdir(tempExtractDir, { recursive: true })
@@ -348,10 +375,10 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 	})
 
 	await step('Update metadata', async () => {
-		await writeDexMetadata(found.root, tag, tag)
+		await writeDexMetadata(found.root, targetTag, targetTag)
 	})
 
-	console.log(`\nSynced ${filesToSync.length} files from ${repo}@${tag} ✓`)
+	console.log(`\nSynced ${filesToSync.length} files from ${repo}@${targetTag} ✓`)
 
 	// Exit process to ensure stdin is closed and process terminates
 	process.exit(0)
@@ -1334,7 +1361,11 @@ async function main() {
 		return
 	}
 
-	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') usage(0)
+	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help' || flags.h || flags.help) {
+		if (cmd !== 'sync' && cmd !== 'pie' && cmd !== 'api') {
+			usage(0)
+		}
+	}
 
 	try {
 		if (cmd === 'update' || cmd === 'upgrade') {
