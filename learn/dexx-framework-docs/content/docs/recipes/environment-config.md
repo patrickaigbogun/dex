@@ -10,29 +10,23 @@ Configure Dex differently for different environments.
 
 ```ts
 // dex.config.ts
-import { defineConfig } from 'dex/config'
-
-export default defineConfig({
-  // Use different paths in production
-  pagesDir: process.env.NODE_ENV === 'production' 
-    ? 'dist/pages'
-    : 'web/pages',
+export default {
+  // Use different paths based on environment
+  pagesDir: process.env.CUSTOM_PAGES_DIR || 'web/pages',
   
-  // Different output dirs
-  outDir: process.env.CUSTOM_OUT_DIR || 'core',
-})
+  // Custom generated routes output
+  outRoutesTs: process.env.CUSTOM_ROUTES_TS || 'core/router/.generated/routes.ts',
+}
 ```
 
 ## Environment-Specific Features
 
 ```ts
-export default defineConfig({
-  // Enable SPA fallback only in production
-  spaFallback: process.env.NODE_ENV === 'production',
-  
-  // Different API endpoints
-  apiUrl: process.env.API_URL || 'http://localhost:3000'
-})
+export default {
+  // Set mode or port from environment
+  port: Number(process.env.PORT) || 7990,
+  mode: process.env.DEX_MODE || 'spa',
+}
 ```
 
 ## .env Files

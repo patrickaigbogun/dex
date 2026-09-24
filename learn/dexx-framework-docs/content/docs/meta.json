@@ -1,0 +1,81 @@
+{
+  "index": "Dex Documentation",
+  "getting-started": {
+    "index": "Getting Started",
+    "what-is-dex": "What is Dex?",
+    "your-first-app": "Your First App",
+    "how-dex-works": "How Dex Works"
+  },
+  "core-concepts": {
+    "index": "Core Concepts",
+    "file-based-routing": "File-Based Routing",
+    "pages-and-layouts": "Pages and Layouts",
+    "configuration": "Configuration",
+    "build-process": "Build Process",
+    "dev-vs-prod": "Dev vs Production"
+  },
+  "router": {
+    "index": "Router",
+    "routing-rules": "Routing Rules",
+    "dynamic-routes": "Dynamic Routes",
+    "layouts": "Layouts",
+    "client-navigation": "Client Navigation",
+    "reference": "Router API Reference"
+  },
+  "server": {
+    "index": "Server",
+    "serving-assets": "Serving Assets",
+    "spa-fallback": "SPA Fallback",
+    "dev-reload": "Dev Reload",
+    "logging": "Logging",
+    "production": "Production Server"
+  },
+  "dev": {
+    "index": "Development",
+    "watch-process": "Watch Process",
+    "dev-reload": "Dev Reload"
+  },
+  "cli": {
+    "index": "CLI",
+    "scaffold": "Scaffold",
+    "commands": "Commands"
+  },
+  "recipes": {
+    "index": "Recipes",
+    "custom-structure": "Custom Project Structure",
+    "monorepo": "Monorepo Setup",
+    "api-only-deploy": "API-Only Deployment",
+    "static-generation": "Static Site Generation",
+    "environment-config": "Environment-Specific Config"
+  },
+  "deployment": {
+    "index": "Deployment",
+    "production-build": "Production Build",
+    "platforms": "Platforms"
+  },
+  "troubleshooting": {
+    "index": "Troubleshooting",
+    "common-errors": "Common Errors",
+    "path-issues": "Path Issues",
+    "build-issues": "Build Failures"
+  },
+  "reference": {
+    "index": "Reference",
+    "cli-flags": "CLI Flags",
+    "config-schema": "Config Schema",
+    "server-exports": "Server Exports",
+    "dev-reference": "Dev API Reference",
+    "file-conventions": "File Conventions"
+  },
+  "agent": {
+    "index": "Agent",
+    "cli": "CLI",
+    "dev": "Dev",
+    "pie": "Pie",
+    "router": "Router",
+    "server": "Server"
+  },
+  "guidelines": {
+    "overview": "Guidelines"
+  }
+}

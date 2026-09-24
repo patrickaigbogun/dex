@@ -15,7 +15,9 @@ Solutions for routing and path resolution problems.
 ```ts
 import { dexSpaFallback } from '@dex/server'
 
-app.use(dexSpaFallback())
+app.use(dexSpaFallback({
+  indexHtmlPath: 'build/index.html'
+}))
 ```
 
 ## Routes Not Generating

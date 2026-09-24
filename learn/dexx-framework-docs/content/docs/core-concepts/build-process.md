@@ -95,8 +95,11 @@ Override output locations in `dex.config.ts`:
 
 ```ts
 export default {
-  outDir: 'src/.generated',  // Generated files
-  distDir: 'build',          // Production output
+  pagesDir: 'src/pages',
+  layoutsDir: 'src/layouts',
+  outRoutesTs: 'src/.generated/routes.ts',
+  outRoutesJson: 'src/.generated/manifest.json',
+  outLayoutsTs: 'src/.generated/layouts.ts',
 }
 ```
 

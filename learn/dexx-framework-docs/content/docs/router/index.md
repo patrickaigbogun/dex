@@ -11,7 +11,7 @@ Dex's file-based router handles routing, layouts, and client-side navigation.
 - [Routing Rules](./routing-rules) — File-based routing patterns
 - [Dynamic Routes](./dynamic-routes) — Capturing URL parameters
 - [Layouts](./layouts) — Layout composition
-- [Client Navigation](./client-navigation) — Link, useRouter, useParams
+- [Client Navigation](./client-navigation) — Link, useNavigate, useParams, useQuery, useLocation
 
 ## How It Works
 

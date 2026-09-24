@@ -124,9 +124,11 @@ build/
 
 Dex includes a client router (`@dex/router/client`) that enables:
 
-- `<Link>` components for navigation
-- `useRouter()` hook for programmatic navigation
-- `useParams()` hook for route params
+- `<Link>` component for accessible client-side navigation
+- `useNavigate()` hook for programmatic navigation
+- `useParams()` hook for dynamic route parameters
+- `useLocation()` and `useQuery()` hooks for URL inspection
+- `ClientOnly` boundary for SSG/prerender safety
 - SPA fallback for client-side routes
 
 ### SPA Fallback
@@ -151,13 +153,10 @@ web/public/    → static assets
 Override with `dex.config.ts`:
 
 ```ts
-import { defineConfig } from 'dex/config'
-
-export default defineConfig({
+export default {
   pagesDir: 'src/routes',
   layoutsDir: 'src/layouts',
-  publicDir: 'static'
-})
+}
 ```
 
 ## Key Takeaways

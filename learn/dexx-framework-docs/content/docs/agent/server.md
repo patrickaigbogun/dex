@@ -8,7 +8,7 @@ title: "Server"
 
 - `dexAssetsRoute({ assetsDir, cacheControlProd?, cacheControlDev? })`
 - `dexSpaFallback({ indexHtmlPath })`
-- `dexDevReloadRouter({ watchFiles?, pollIntervalMs? })`
+- `dexDevReloadRouter({ watchFiles?, watchDirs?, pollIntervalMs? })`
 - `dexPrettyLogger({ ignore?, includeQuery? })`
 
 ## Key behavior

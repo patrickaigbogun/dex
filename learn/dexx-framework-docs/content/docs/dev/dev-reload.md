@@ -16,26 +16,22 @@ The dev reload helper watches your build output and triggers browser refresh whe
 import { dexDevReloadRouter } from '@dex/server'
 
 app.use(dexDevReloadRouter({
-  watchDirs: ['build/assets'],
-  watchFiles: ['build/assets/client.js', 'build/assets/styles.css']
+  watchDirs: ['web/public/assets'],
+  watchFiles: ['web/public/assets/client.js', 'web/public/assets/styles.css'],
+  pollIntervalMs: 250
 }))
 ```
 
-## Automatic
+## Configuration Resolution
 
-By default, it reads from your `dex.config.ts`:
+By default, `dexDevReloadRouter` watches your client assets:
 
 ```ts
-// dex.config.ts
+// Built-in defaults or configure via dex.config.ts:
 export default {
-  pagesDir: 'src/pages',
-  layoutsDir: 'src/layouts',
-  outDir: 'src/.generated',
+  watchDirs: ['web/public/assets'],
+  watchFiles: ['web/public/assets/client.js', 'web/public/assets/styles.css']
 }
-
-// Server automatically watches:
-// - src/.generated/routes.ts
-// - src/.generated/layouts.ts
 ```
 
 ## EventSource

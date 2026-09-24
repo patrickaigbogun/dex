@@ -8,35 +8,45 @@ In this tutorial, you'll build a simple blog with Dex. You'll learn how pages, l
 
 ## Prerequisites
 
-- Bun installed (check with `bun --version`)
+- [Bun](https://bun.sh) installed (check with `bun --version`)
+- Dex CLI installed or accessible via Bun
 - A code editor (VS Code recommended)
 
 ## Step 1: Create the Project
 
+Scaffold a new Dex application with `dex scaffold`:
+
 ```bash
 # Scaffold a new Dex project
-bunx dex create my-blog
+dex scaffold my-blog
 
 # Enter the project directory
 cd my-blog
 ```
 
-This creates:
+During scaffolding, select your project type (`spa` or `mpa`). The CLI creates the project structure, downloads required framework packages into `packages/`, creates `.dex/metadata.json`, and installs dependencies:
+
 ```
 my-blog/
-├─ dex.config.ts      # Optional configuration
-├─ package.json
+├─ .dex/
+│  └─ metadata.json       # Template metadata & version tracking
+├─ dex.config.ts          # Framework configuration
+├─ package.json           # Dependencies and scripts
+├─ tsconfig.json          # TypeScript configuration
+├─ packages/              # Framework packages (router, server, dev, pie)
 ├─ web/
-│  ├─ pages/          # Your routes go here
-│  ├─ layouts/        # Shared layouts
-│  └─ public/         # Static assets
-└─ core/              # Generated files
+│  ├─ pages/              # Your routes go here
+│  ├─ layouts/            # Shared layouts
+│  └─ public/             # Static assets
+└─ routes/                # API route handlers
 ```
 
 ## Step 2: Start the Dev Server
 
+Start the development server with `dex start` (or `bun run dev`):
+
 ```bash
-bun run dev
+dex start
 ```
 
 You should see:
@@ -44,7 +54,7 @@ You should see:
 🚀 Dex dev server running at http://localhost:7990
 ```
 
-Open your browser to see the welcome page.
+Open your browser to `http://localhost:7990` to see the welcome page.
 
 ## Step 3: Edit the Homepage
 
@@ -72,7 +82,7 @@ Save the file. The dev server will hot-reload, and you'll see your changes.
 Create `web/layouts/global.tsx`:
 
 ```tsx
-export default function GlobalLayout({ children }) {
+export default function GlobalLayout({ children }: { children: React.ReactNode }) {
   return (
     <div>
       <nav>
@@ -126,38 +136,39 @@ export default function Post() {
 }
 ```
 
-Visit `http://localhost:7990/posts/1` or `/posts/my-first-post`.
+Visit `http://localhost:7990/posts/1` or `http://localhost:7990/posts/my-first-post`.
 
 ## Step 7: Build for Production
 
+Build the application for production using `dex build` (or `bun run build`):
+
 ```bash
-bun run build
+dex build
 ```
 
-This creates a `build/` folder with:
-- A Node.js server binary
-- Static assets
-- Generated routes
+This compiles your application and builds your client bundle and server output into `build/`.
 
 ## Step 8: Run Production Server
 
+Start the production server using `dex start -p` (or `bun run start`):
+
 ```bash
-cd build
-PORT=7990 ./server
+dex start -p
 ```
 
-Your app is now running in production mode at `http://localhost:7990`.
+Your app is now running in production mode (`NODE_ENV=production`) at `http://localhost:7990`.
 
 ## What You Learned
 
-- How to scaffold a Dex project
-- How pages map to routes
-- How layouts wrap pages
-- How dynamic routes work with `[slug]`
-- How to build and run in production
+- How to scaffold a Dex project with `dex scaffold <dir>`
+- How pages map to file-based routes in `web/pages/`
+- How layouts wrap pages in `web/layouts/`
+- How dynamic routes work with parameters like `[slug]`
+- How to build (`dex build`) and run in production (`dex start -p`)
 
 ## Next Steps
 
-- [File-Based Routing](./file-based-routing) — Deep dive into routing patterns
-- [Pages and Layouts](./pages-and-layouts) — Layout composition and metadata
-- [Configuration](./configuration) — Customize folder structure
+- [File-Based Routing](../core-concepts/file-based-routing) — Deep dive into routing patterns
+- [Pages and Layouts](../core-concepts/pages-and-layouts) — Layout composition and metadata
+- [CLI Commands](../cli/commands) — Explore all Dex CLI commands
+- [Configuration](../core-concepts/configuration) — Customize folder structure and options

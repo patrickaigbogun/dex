@@ -20,14 +20,13 @@ web/
 Create `dex.config.ts`:
 
 ```ts
-import { defineConfig } from 'dex/config'
-
-export default defineConfig({
+export default {
   pagesDir: 'src/routes',
   layoutsDir: 'src/layouts',
-  publicDir: 'static',
-  outDir: 'src/.generated',
-})
+  outRoutesTs: 'src/.generated/routes.ts',
+  outRoutesJson: 'src/.generated/manifest.json',
+  outLayoutsTs: 'src/.generated/layouts.ts',
+}
 ```
 
 Now your structure becomes:

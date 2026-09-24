@@ -2,59 +2,115 @@
 title: "Pie"
 ---
 
-````markdown
 # `@dex/pie` (Dex Pie)
 
-A small wrapper around Eden `treaty` that keeps Dex’s “explicit + typed” philosophy:
+A high-performance, framework-agnostic typed API client and OpenAPI route-tree generator:
 
-- You export a single API app type from the server (`export type Api = typeof api`).
-- You create a typed client from that type.
-- Pie adds a retrying transport and a simple header-merge helper.
+- Turns any backend API contract (Phoenix, Go, Rails, FastAPI, Express) into a **typed, autocompleteable route tree** (`api.v1.guilds('123').channels('456').messages.get(...)`).
+- Uses **OpenAPI as the cross-repository bridge** to generate route trees and DTO interfaces into `core/api/generated.ts`.
+- Built-in resilient transport: exponential backoff with jitter retries, dynamic auth headers, request/response interceptors, and one-off `baseUrl` overrides.
+- First-party Eden Treaty adapter (`treatyPie`) available for fullstack Elysia setups.
 
-## Server side: define the API type
+---
 
-In the starter template this lives in `templates/starter/core/api/index.ts`:
+## 1. Generating Route Tree from Backend OpenAPI
 
-```ts
-import { Elysia } from 'elysia'
+Run the `dex pie generate` CLI command pointing to your backend's OpenAPI URL or local JSON file:
 
-export const api = new Elysia()
-  // ...routes...
-
-export type Api = typeof api
+```bash
+bunx dex pie generate https://api.concord.chat/api/openapi.json
 ```
 
-## Client side: create a typed client
+Or configure `dex.config.ts`:
 
 ```ts
-import pie from '@dex/pie'
-import type { Api } from '@core/api'
+// dex.config.ts
+export default {
+  mode: 'spa',
+  apiSpec: 'https://api.concord.chat/api/openapi.json',
+  apiUrl: 'https://api.concord.chat',
+  outApiTs: 'core/api/generated.ts',
+  apiPrefix: '/api', // Stripped from tree access so you write api.v1... not api.api.v1...
+}
+```
 
-const client = pie<Api>('http://localhost:7990/api', {
-  pieHeaders: () => ({
-    // Authorization: `Bearer ${token}`,
+Then simply run:
+
+```bash
+bunx dex pie generate
+```
+
+This generates `core/api/generated.ts` containing:
+- All schema models & DTO interfaces (e.g. `Message`, `User`, `CreateMessageDto`).
+- The `ApiRoutes` route tree contract.
+- The preconfigured `createApiClient()` factory function.
+
+---
+
+## 2. Consuming the Typed API Route Tree in Frontend
+
+```ts
+// core/api/index.ts
+import { createApiClient } from './generated'
+
+export const api = createApiClient({
+  headers: () => ({
+    Authorization: `Bearer ${getAuthToken()}`,
   }),
   retry: {
-    retries: 2,
+    retries: 3,
+    minDelayMs: 150,
+    maxDelayMs: 2000,
+    retryOnStatuses: [408, 425, 429, 500, 502, 503, 504],
   },
 })
-
-const res = await client.health.get()
-
-if (res.error) {
-  // res.error is typed by status code
-  throw new Error(`API error: ${res.status}`)
-}
-
-console.log(res.data)
 ```
 
-## Options
+### Making Calls:
 
-Pie options are Eden `Treaty.Config` plus:
+```ts
+// 1. Static route with query parameters:
+// GET /api/v1/health?verbose=true
+const { data, error, status } = await api.v1.health.get({
+  query: { verbose: true }
+})
 
-- `pieHeaders`: `Record<string, string>` or `() => Record<string, string>` merged into every request.
-- `pieFetch`: custom fetch function (useful for SSR/tests).
-- `retry`: retry policy (status-based + network errors).
+// 2. Dynamic subroutes:
+// GET /api/v1/guilds/123/channels/456/messages?limit=50
+const { data: messages } = await api.v1
+  .guilds('123')
+  .channels('456')
+  .messages.get({
+    query: { limit: 50 }
+  })
 
-````
+// 3. Typed request body:
+// POST /api/v1/channels/456/messages
+const { data: createdMessage } = await api.v1
+  .channels('456')
+  .messages.post({
+    body: {
+      content: 'Hello Concord!',
+    }
+  })
+
+// 4. One-off base URL override (e.g. calling a dedicated voice microservice):
+const { data: voiceSession } = await api.voice.session.get({
+  baseUrl: 'https://voice.concord.chat'
+})
+```
+
+---
+
+## 3. First-Party Elysia Eden Mode (Optional)
+
+If backend and frontend share TypeScript types in a monorepo with Elysia:
+
+```ts
+import { treatyPie } from '@dex/pie/treaty'
+import type { App } from './server'
+
+export const elysiaClient = treatyPie<App>('http://localhost:3000')
+```
+
+

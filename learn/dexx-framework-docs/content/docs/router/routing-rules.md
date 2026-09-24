@@ -68,25 +68,55 @@ Files/folders starting with `_` are ignored:
 | `web/pages/_private.tsx` | ❌ Ignored |
 | `web/pages/_utils/helper.tsx` | ❌ Ignored |
 
-## Route Precedence
+## Route Precedence & Ranking
 
-1. **Static routes** — `/about` matches before `/blog/[slug]`
-2. **Dynamic routes** — `/blog/[slug]` matches `/blog/123`
-3. **Catch-all** — `/[...slug]` matches everything else
+Dex sorts routes deterministically using segment specificity scoring:
+
+1. **Static segments (`kind: 'static'`, Score = 3)** — Exact path matches (e.g. `/posts/new`).
+2. **Param segments (`kind: 'param'`, Score = 2)** — Named dynamic parameters (e.g. `/posts/[slug]`).
+3. **Catch-All segments (`kind: 'catchAll'`, Score = 1)** — Fallback rest parameters (e.g. `/posts/[...all]`).
+
+### Example Ordering
+When an incoming request is evaluated, routes are checked in precedence order:
+
+| Specificity Order | Route File | Pattern | Matches Example |
+|---|---|---|---|
+| **1 (Highest)** | `web/pages/posts/new.tsx` | `/posts/new` | `/posts/new` |
+| **2** | `web/pages/posts/[slug].tsx` | `/posts/:slug` | `/posts/announcing-dex` |
+| **3 (Lowest)** | `web/pages/posts/[...all].tsx` | `/posts/*` | `/posts/2026/09/21/deep-dive` |
+
+This guarantees that a static page like `/posts/new` is never eclipsed by a dynamic parameter `[slug]`.
 
 ## Generated Output
 
-After build, routes are in `core/router/.generated/routes.ts`:
+When running `dex-router generate` or during `bun run build`, routes are written to `core/router/.generated/routes.ts`:
 
 ```ts
-export const routes = [
-  { path: '/', component: () => import('../pages/index.tsx') },
-  { path: '/about', component: () => import('../pages/about.tsx') },
-  { path: '/blog/:slug', component: () => import('../pages/blog/[slug].tsx') }
+import type { Route } from '@dex/router'
+
+export const routes: Route[] = [
+  {
+    file: 'posts/new.tsx',
+    path: '/posts/new',
+    segments: [
+      { kind: 'static', value: 'posts' },
+      { kind: 'static', value: 'new' }
+    ],
+    importPage: () => import('../../web/pages/posts/new.tsx'),
+  },
+  {
+    file: 'posts/[slug].tsx',
+    path: '/posts/[slug]',
+    segments: [
+      { kind: 'static', value: 'posts' },
+      { kind: 'param', name: 'slug' }
+    ],
+    importPage: () => import('../../web/pages/posts/[slug].tsx'),
+  }
 ]
 ```
 
-**Don't edit this file** — it's auto-generated.
+**Don't edit this file** — it is automatically generated and synchronized on file changes.
 
 ## See Also
 

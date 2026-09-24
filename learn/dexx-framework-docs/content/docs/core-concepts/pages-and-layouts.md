@@ -35,126 +35,90 @@ export const metadata = {
 
 ## Layouts
 
-Layouts wrap pages with shared UI (header, footer, navigation).
+Layouts wrap pages with shared UI (navigation, sidebars, footers).
 
 ### Global Layout
 
-Create `web/layouts/global.tsx` to wrap all pages:
+Create `web/layouts/global.tsx` to wrap all pages across your application:
 
 ```tsx
 // web/layouts/global.tsx
-export default function GlobalLayout({ children }) {
+export default function GlobalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>
-        <header>
-          <nav>
-            <a href="/">Home</a>
-            <a href="/about">About</a>
-          </nav>
-        </header>
-        <main>{children}</main>
-        <footer>© 2024 My Site</footer>
-      </body>
-    </html>
-  )
-}
-```
-
-### Page-Specific Layouts
-
-Override the global layout for a specific page:
-
-```tsx
-// web/pages/dashboard.tsx
-export default function Dashboard() {
-  return <div>Dashboard content</div>
-}
-
-// This layout only wraps the Dashboard page
-export function layout({ children }) {
-  return (
-    <div className="dashboard-layout">
-      <aside>Sidebar</aside>
+    <div className="app-shell">
+      <header>
+        <nav>
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+        </nav>
+      </header>
       <main>{children}</main>
+      <footer>© 2026 My Site</footer>
     </div>
   )
 }
 ```
 
-### Section Layouts
+The global layout is passed directly to `<FileRouter GlobalLayout={GlobalLayout} />` in your app bootstrap (`core/bootstrap/web.tsx`).
 
-Create layouts for specific sections:
+### Named Layouts
+
+Create reusable named layouts in `web/layouts/`:
 
 ```
 web/layouts/
-├─ global.tsx        # All pages
-├─ blog.tsx          # Blog pages only
-└─ admin.tsx         # Admin pages only
+├─ global.tsx        # Wraps all pages
+├─ dashboard.tsx     # Dashboard layout
+└─ auth.tsx          # Auth layout
 ```
 
-Dex looks for `web/layouts/[page-name].tsx` automatically:
+Define the layout component (e.g. `web/layouts/dashboard.tsx`):
 
 ```tsx
-// web/layouts/blog.tsx
-export default function BlogLayout({ children }) {
+// web/layouts/dashboard.tsx
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <h1>Blog</h1>
-      <hr />
-      {children}
+    <div className="dashboard-layout flex">
+      <aside className="w-64 border-r">Sidebar</aside>
+      <section className="flex-1 p-6">{children}</section>
     </div>
   )
 }
 ```
 
-Now all blog pages use this layout:
+### Applying a Layout to a Page
 
-```
-web/pages/blog/
-├─ index.tsx         # Uses BlogLayout
-└─ [slug].tsx        # Uses BlogLayout
-```
-
-## Layout Composition Order
-
-Layouts apply in this order (outer to inner):
-
-1. `web/layouts/global.tsx`
-2. `web/layouts/[page]/layout.tsx` or `web/layouts/[page].tsx`
-3. Page-level `layout` export
-
-Example:
+To apply a named layout to a page, export `layout` with the layout's file name:
 
 ```tsx
-// web/layouts/global.tsx
-export default function Global({ children }) {
-  return <div className="global">{children}</div>
-}
+// web/pages/dashboard.tsx
+export const metadata = { title: "Dashboard" }
 
-// web/layouts/blog.tsx
-export default function Blog({ children }) {
-  return <div className="blog">{children}</div>
-}
+// Selects web/layouts/dashboard.tsx
+export const layout = "dashboard"
 
-// web/pages/blog/posts.tsx
-export default function Posts() {
-  return <h1>Posts</h1>
-}
-
-export function layout({ children }) {
-  return <div className="posts">{children}</div>
+export default function DashboardPage() {
+  return <h1>Welcome to Dashboard</h1>
 }
 ```
+
+### Layout Hierarchy
+
+When a page declares a layout, Dex composes them in order:
+
+1. **GlobalLayout** (from `web/layouts/global.tsx`)
+2. **Page-declared Layout** (e.g. `web/layouts/dashboard.tsx`)
+3. **Page Component** (from `web/pages/dashboard.tsx`)
 
 Rendered output:
 
 ```html
-<div class="global">
-  <div class="blog">
-    <div class="posts">
-      <h1>Posts</h1>
-    </div>
+<div class="app-shell">
+  <div class="dashboard-layout">
+    <aside>Sidebar</aside>
+    <section>
+      <h1>Welcome to Dashboard</h1>
+    </section>
   </div>
 </div>
 ```

@@ -1,11 +1,6 @@
 ---
 title: "What Is Dex"
----
-
---- 
-title: "What is Dex?"
-author: "Dex Team"
-date: "2026-07-05"
+description: "Overview and key concepts of the Dex framework"
 ---
 
 # What is Dex?

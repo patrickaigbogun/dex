@@ -25,14 +25,13 @@ my-monorepo/
 In `packages/web/dex.config.ts`:
 
 ```ts
-import { defineConfig } from 'dex/config'
-
-export default defineConfig({
+export default {
   pagesDir: 'web/pages',
   layoutsDir: 'web/layouts',
-  publicDir: 'web/public',
-  outDir: 'web/.generated',
-})
+  outRoutesTs: 'core/router/.generated/routes.ts',
+  outRoutesJson: 'core/router/.generated/manifest.json',
+  outLayoutsTs: 'core/router/.generated/layouts.ts',
+}
 ```
 
 ## Root Package.json

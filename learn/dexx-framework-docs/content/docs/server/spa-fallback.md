@@ -1,62 +1,54 @@
 ---
-title: "Spa Fallback"
+title: "SPA Fallback"
 ---
 
 # SPA Fallback
 
-SPA fallback ensures client-side routes work in production by serving `index.html` for non-API, non-static routes.
+SPA fallback ensures client-side routes work seamlessly by serving your `index.html` for non-API, non-asset GET requests.
 
 ## How It Works
 
-When a request doesn't match:
-- `/api/*` (API routes)
-- `/assets/*` (static files)
-- Any path containing `.` (static file extension)
+`dexSpaFallback` mounts a catch-all GET route (`*`) and serves the file at `indexHtmlPath`.
 
-The server serves `index.html`, letting the client router handle the route.
+It automatically bypasses fallback for:
+- Non-`GET` HTTP methods
+- `/api/*` (API endpoints)
+- `/assets/*` (static asset requests)
+- `/__dev/*` (dev reload SSE requests)
+- Any path containing `.` (requests for files with extensions like `.ico`, `.png`, `.json`)
+- Requests with an `Accept` header that explicitly does not accept `text/html` or `*/*`
 
-## Example
-
-| Request | Response |
-|---------|----------|
-| `GET /` | `index.html` |
-| `GET /about` | `index.html` |
-| `GET /users/123` | `index.html` |
-| `GET /api/health` | API response |
-| `GET /assets/client.js` | Static file |
-| `GET /favicon.png` | 404 (not found) |
-
-## Configuration
+## Usage
 
 ```ts
 import { dexSpaFallback } from '@dex/server'
 
 app.use(dexSpaFallback({
-  // Default: skip /api/*, /assets/*, paths with .
-  skip: ['/api', '/assets']
+  indexHtmlPath: 'build/index.html' // in production, or 'web/public/index.html'
 }))
 ```
 
-## Client Router
+### Options
 
-The client router (`@dex/router/client`) handles these routes:
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `indexHtmlPath` | `string` | *(required)* | Path to the entry `index.html` file to serve for SPA routing. |
 
-```tsx
-import { BrowserRouter } from '@dex/router/client'
+## Request Handling Example
 
-export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/:slug" element={<Page />} />
-      </Routes>
-    </BrowserRouter>
-  )
-}
-```
+| Request | `dexSpaFallback` Behavior |
+|---------|---------------------------|
+| `GET /` | Serves `index.html` |
+| `GET /about` | Serves `index.html` |
+| `GET /users/123` | Serves `index.html` |
+| `GET /api/health` | Bypassed (handled by API routes) |
+| `GET /assets/client.js` | Bypassed (handled by `dexAssetsRoute`) |
+| `GET /__dev/reload` | Bypassed (handled by `dexDevReloadRouter`) |
+| `GET /favicon.ico` | Bypassed (contains `.`) |
+| `POST /submit` | Bypassed (non-GET method) |
 
 ## See Also
 
-- [Client Navigation](./client-navigation) — Router hooks
-- [Production](./production) — Deployment setup
+- [Server Exports](../reference/server-exports) — Server helpers API
+- [Serving Assets](./serving-assets) — Static asset delivery
+- [Production Server](./production) — Production deployment setup

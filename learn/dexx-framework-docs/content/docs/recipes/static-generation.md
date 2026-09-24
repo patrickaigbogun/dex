@@ -25,32 +25,31 @@ SSG (Static Site Generation) renders pages to static HTML during the build proce
 
 ## Configuration
 
+Set the default rendering strategy in `dex.config.ts`:
+
 ```ts
 // dex.config.ts
 export default {
-  ssg: {
-    // Routes to pre-render
-    routes: [
-      '/',
-      '/about',
-      '/blog',
-      '/blog/post-1',
-      '/blog/post-2'
-    ]
-  }
+  renderStrategy: 'ssg',
 }
 ```
 
-## Programmatic
+Or configure rendering strategy per-page:
 
-```ts
-import { generateStaticSite } from '@dex/router'
+```tsx
+// web/pages/blog/[slug].tsx
+export const metadata = {
+  renderStrategy: 'ssg',
+}
 
-await generateStaticSite({
-  routes: ['/', '/about'],
-  outDir: 'build'
-})
+export default function BlogPost() {
+  return <article>Content</article>
+}
 ```
+
+## Prerendering
+
+During build, `dexPrerender` generates static HTML files for static routes when `renderStrategy` is set to `'ssg'`.
 
 ## Performance Benefits
 

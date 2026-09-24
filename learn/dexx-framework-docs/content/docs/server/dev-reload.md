@@ -21,26 +21,28 @@ When files change during development, the browser automatically reloads:
 import { dexDevReloadRouter } from '@dex/server'
 
 app.use(dexDevReloadRouter({
-  watchDirs: ['build/assets'],
-  watchFiles: ['build/assets/client.js']
+  watchDirs: ['web/public/assets'],
+  watchFiles: ['web/public/assets/client.js', 'web/public/assets/styles.css'],
+  pollIntervalMs: 250
 }))
 ```
 
-## Auto-Configuration
+## Options and Configuration
 
-If you use `dex.config.ts`, dev reload reads paths automatically:
+If not explicitly passed in options, `dexDevReloadRouter` resolves watch targets from `dex.config.ts` or falls back to built-in defaults:
 
 ```ts
 // dex.config.ts
 export default {
-  pagesDir: 'src/routes',
-  outDir: 'src/.generated'
+  watchDirs: ['web/public/assets'],
+  watchFiles: ['web/public/assets/client.js', 'web/public/assets/styles.css']
 }
-
-// Dev reload watches:
-// - src/.generated/routes.ts
-// - src/.generated/layouts.ts
 ```
+
+### Resolution Precedence:
+1. Explicit options passed to `dexDevReloadRouter({ watchFiles, watchDirs, pollIntervalMs })`
+2. Configuration properties (`watchFiles`/`devWatchFiles`, `watchDirs`/`devWatchDirs`) from `dex.config.ts`
+3. Built-in defaults (`web/public/assets` directory, `web/public/assets/client.js`, and `web/public/assets/styles.css`)
 
 ## Disabling Hot Reload
 

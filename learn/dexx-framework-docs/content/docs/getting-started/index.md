@@ -21,13 +21,13 @@ Welcome! Dex is a Bun-first framework for building web applications with file-ba
 
 ```bash
 # Scaffold a new Dex project
-bunx dex create my-app
+dex scaffold my-app
 
 # Enter the project directory
 cd my-app
 
 # Start the dev server
-bun run dev
+dex start
 ```
 
 Your app will be running at `http://localhost:7990`.
