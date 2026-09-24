@@ -6,7 +6,7 @@ import { apiRoutes } from '../../../routes/api'
 const basePort = Number(process.env.PORT ?? 7990)
 if (!Number.isFinite(basePort) || basePort <= 0) throw new Error(`Invalid PORT: ${process.env.PORT}`)
 
-const port = findAvailablePort(basePort)
+const port = await findAvailablePort(basePort)
 if (port !== basePort) {
 	console.log(`Port ${basePort} is in use. Using ${port} instead.`)
 }
