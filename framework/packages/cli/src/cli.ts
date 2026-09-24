@@ -995,8 +995,26 @@ async function cmdStart(prod: boolean) {
 	}
 }
 
+declare const DEX_CLI_VERSION: string | undefined
+
 async function getCliVersion(): Promise<string> {
-	return (pkg as any).version ?? '0.1.0'
+	if (typeof DEX_CLI_VERSION !== 'undefined' && DEX_CLI_VERSION) {
+		return DEX_CLI_VERSION.replace(/^v/, '')
+	}
+	if (process.env.DEX_CLI_VERSION) {
+		return process.env.DEX_CLI_VERSION.replace(/^v/, '')
+	}
+	if ((pkg as any)?.version) {
+		return String((pkg as any).version).replace(/^v/, '')
+	}
+	try {
+		const exec = process.execPath
+		const match = exec.match(/[/\\]versions[/\\]v?(\d+\.\d+\.\d+(?:\.[^/\\]+)?)/)
+		if (match && match[1]) {
+			return match[1]
+		}
+	} catch {}
+	return '0.2.1'
 }
 
 type DexMetadata = {

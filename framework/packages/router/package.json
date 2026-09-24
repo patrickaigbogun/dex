@@ -1,6 +1,7 @@
 {
   "name": "@dex/router",
-   "private": false,
+  "version": "0.2.1",
+  "private": false,
   "type": "module",
   "bin": {
     "dex-router": "./bin/dex-router.js"

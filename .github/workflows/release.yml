@@ -49,7 +49,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
-          bun build --compile ./packages/cli/src/cli.ts --outfile ../dist/dex-${{ matrix.target }}${{ matrix.ext }} --target=bun-${{ matrix.target }}
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          bun build --compile ./packages/cli/src/cli.ts --outfile ../dist/dex-${{ matrix.target }}${{ matrix.ext }} --target=bun-${{ matrix.target }} --define DEX_CLI_VERSION="\"${TAG_VERSION}\""
         working-directory: framework
 
       - name: Upload binary artifact
