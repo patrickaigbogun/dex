@@ -31,7 +31,7 @@ function isIgnoredRouteFile(relPosix: string) {
 	return parts.some((p) => p.startsWith('_'))
 }
 
-function parseSegment(seg: string): RouteSegment {
+export function parseSegment(seg: string): RouteSegment {
 	if (seg.startsWith('[...') && seg.endsWith(']')) {
 		return { kind: 'catchAll', name: seg.slice(4, -1) }
 	}
@@ -41,7 +41,7 @@ function parseSegment(seg: string): RouteSegment {
 	return { kind: 'static', value: seg }
 }
 
-function fileToRoute(relPosixNoExt: string) {
+export function fileToRoute(relPosixNoExt: string) {
 	// Nuxt-like: folder/index => /folder, and root index => /
 	let p = relPosixNoExt
 	if (p === 'index') p = ''
@@ -52,6 +52,60 @@ function fileToRoute(relPosixNoExt: string) {
 	const segments = segs.map(parseSegment)
 
 	return { path: urlPath === '/' ? '/' : urlPath.replace(/\/+$/g, ''), segments }
+}
+
+export function getSegmentScore(seg: RouteSegment): number {
+	switch (seg.kind) {
+		case 'static':
+			return 3
+		case 'param':
+			return 2
+		case 'catchAll':
+			return 1
+	}
+}
+
+export function compareRouteSegments(a: RouteSegment[], b: RouteSegment[]): number {
+	const minLen = Math.min(a.length, b.length)
+	for (let i = 0; i < minLen; i++) {
+		const segA = a[i]!
+		const segB = b[i]!
+
+		const scoreA = getSegmentScore(segA)
+		const scoreB = getSegmentScore(segB)
+
+		if (scoreA !== scoreB) {
+			// Higher score comes first (descending)
+			return scoreB - scoreA
+		}
+
+		// Same kind
+		if (segA.kind === 'static' && segB.kind === 'static') {
+			const cmp = segA.value.localeCompare(segB.value)
+			if (cmp !== 0) return cmp
+		} else if (segA.kind === 'param' && segB.kind === 'param') {
+			const cmp = segA.name.localeCompare(segB.name)
+			if (cmp !== 0) return cmp
+		} else if (segA.kind === 'catchAll' && segB.kind === 'catchAll') {
+			const cmp = segA.name.localeCompare(segB.name)
+			if (cmp !== 0) return cmp
+		}
+	}
+
+	// More specific route (more segments) comes first
+	if (a.length !== b.length) {
+		return b.length - a.length
+	}
+
+	return 0
+}
+
+export function sortRoutesByPrecedence<T extends { segments: RouteSegment[]; path: string }>(routes: T[]): T[] {
+	return routes.sort((a, b) => {
+		const cmp = compareRouteSegments(a.segments, b.segments)
+		if (cmp !== 0) return cmp
+		return a.path.localeCompare(b.path)
+	})
 }
 
 async function walk(dirAbs: string): Promise<string[]> {
@@ -76,7 +130,7 @@ async function walkIfExists(dirAbs: string): Promise<string[]> {
 	}
 }
 
-function fileToLayoutName(relPosixNoExt: string) {
+export function fileToLayoutName(relPosixNoExt: string) {
 	let n = relPosixNoExt
 	if (n.endsWith('/index')) n = n.slice(0, -'/index'.length)
 	return n
@@ -168,7 +222,7 @@ export async function generateFsRoutes(opts?: {
 		routes.push({ file: rel, path: routePath, segments, importPath: importPathNormalized })
 	}
 
-	routes.sort((a, b) => a.path.localeCompare(b.path))
+	sortRoutesByPrecedence(routes)
 
 	await mkdir(path.dirname(outTsAbs), { recursive: true })
 

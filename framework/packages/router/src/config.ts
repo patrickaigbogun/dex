@@ -4,6 +4,7 @@ import path from 'node:path'
 export type DexConfig = {
 	mode?: string
 	port?: number
+	renderStrategy?: 'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic'
 
 	// Router generation paths (current naming)
 	pagesDir?: string
@@ -11,6 +12,12 @@ export type DexConfig = {
 	outRoutesTs?: string
 	outRoutesJson?: string
 	outLayoutsTs?: string
+
+	// API / Pie generation config
+	apiSpec?: string
+	apiUrl?: string
+	outApiTs?: string
+	apiPrefix?: string
 }
 
 const CONFIG_FILENAMES = ['dex.config.ts', 'dex.config.js', 'dex.config.mjs', 'dex.config.cjs']
@@ -58,6 +65,8 @@ export const DEFAULT_PATHS = {
 	outRoutesTs: 'core/router/.generated/routes.ts',
 	outRoutesJson: 'core/router/.generated/manifest.json',
 	outLayoutsTs: 'core/router/.generated/layouts.ts',
+	outApiTs: 'core/api/generated.ts',
+	apiPrefix: '/api',
 } as const
 
 export function resolveFromRoot(root: string, input: string): string {
