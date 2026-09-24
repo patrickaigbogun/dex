@@ -12,10 +12,24 @@ Welcome! Dex is a Bun-first framework for building web applications with file-ba
 - How to scaffold your first app in 5 minutes
 - How to develop, build, and deploy
 
-## Prerequisites
+## Installation
 
-- [Bun](https://bun.sh) (v1.1+) installed on your machine
-- Basic knowledge of TypeScript and React
+Install the Dex CLI on your system:
+
+### Linux / macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
+```
+
+### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.ps1 | iex
+```
+
+To update an existing installation to the latest version at any time, run:
+```bash
+dex update
+```
 
 ## Quick Start
 

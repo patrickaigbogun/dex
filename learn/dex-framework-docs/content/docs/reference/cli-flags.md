@@ -36,6 +36,47 @@ dex sync [options]
 | `--repo <owner/repo>` | Metadata repo | Template repository |
 | `--tag <tag>` | Metadata releaseTag / `latest` | Release tag to sync |
 
+### `dex update`
+
+```bash
+dex update [version] [options]
+```
+
+| Flag / Arg | Default | Description |
+|------------|---------|-------------|
+| `[version]` | `latest` | Specific version tag to download and activate |
+| `--force` | `false` | Force re-download even if already installed |
+| `--repo <owner/repo>` | `patrickaigbogun/dex` | Repository containing release binaries |
+
+### `dex versions` / `dex list`
+
+```bash
+dex versions
+```
+
+List all installed versions in `~/.dex/versions/`.
+
+### `dex use <version>`
+
+```bash
+dex use <version>
+```
+
+Switch active version symlink to an already installed version.
+
+### `dex pie generate`
+
+```bash
+dex pie generate [spec-url-or-file] [options]
+```
+
+| Flag / Arg | Default | Description |
+|------------|---------|-------------|
+| `[spec-url-or-file]` | `dex.config.ts` `apiSpec` | OpenAPI specification file path or URL |
+| `--out <path>` | `core/api/generated.ts` | Destination TypeScript output file |
+| `--prefix <prefix>` | `/api` | Path prefix to strip from route tree |
+| `--url <baseUrl>` | `dex.config.ts` `apiUrl` | Default API base URL for client initialization |
+
 ### `dex start`
 
 ```bash

@@ -11,6 +11,10 @@ The Dex CLI (`dex`) provides commands for scaffolding projects, syncing upstream
 ```bash
 dex scaffold <dir> [options]
 dex sync [--interactive] [options]
+dex update [version] [--force]
+dex versions | dex list
+dex use <version>
+dex pie generate [spec-url-or-file] [options]
 dex tag <patch|minor|major>
 dex build
 dex start [-p]
@@ -91,6 +95,125 @@ dex sync --interactive
 
 # Sync against a specific release tag and repository
 dex sync --repo myorg/dex --tag v0.2.0
+```
+
+---
+
+## `dex update`
+
+Update the Dex CLI to the latest release (or a specific version) with multi-version storage.
+
+```bash
+dex update [version] [options]
+```
+
+`dex update` checks GitHub Releases for newer versions, downloads the pre-compiled binary for your OS and architecture into `~/.dex/versions/<version>/dex`, displays live download progress, and atomically updates the active symlink (`~/.dex/current` and `~/.dex/bin/dex`).
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `[version]` | Specific version tag to install (e.g. `v0.2.0`). Defaults to latest GitHub release. |
+| `--force` | Force re-download even if already on the target version. |
+| `--repo <owner/repo>` | Release repository (default: `patrickaigbogun/dex` or `DEX_TEMPLATE_REPO`). |
+
+### Examples
+
+```bash
+# Update to latest stable release
+dex update
+
+# Install and switch to a specific version
+dex update v0.2.0
+
+# Force re-downloading current version
+dex update --force
+```
+
+---
+
+## `dex versions` / `dex list`
+
+List all locally installed Dex CLI versions stored in `~/.dex/versions/`.
+
+```bash
+dex versions
+# or
+dex list
+# or
+dex ls
+```
+
+Displays installed versions and marks the currently active version with `* (active)`.
+
+### Examples
+
+```bash
+dex versions
+```
+
+Output:
+```
+Dex installed versions (~/.dex):
+
+  * v0.2.0 (active)
+    v0.1.44
+```
+
+---
+
+## `dex use`
+
+Switch the active CLI version to another already-installed version.
+
+```bash
+dex use <version>
+```
+
+Atomically points `~/.dex/current` to `~/.dex/versions/<version>/` and updates `~/.dex/bin/dex`.
+
+### Examples
+
+```bash
+dex use v0.1.44
+# Now using Dex v0.1.44 ✓
+
+dex use v0.2.0
+# Now using Dex v0.2.0 ✓
+```
+
+---
+
+## `dex pie generate`
+
+Generate a fully typed route-tree API client from an OpenAPI specification.
+
+```bash
+dex pie generate [spec-url-or-file] [options]
+```
+
+Generates a typed route tree into `core/api/generated.ts` (or custom path) that maps HTTP methods and paths into nested method calls with full parameter and response typing.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `[spec-url-or-file]` | Path to a local OpenAPI JSON/YAML file, or a URL to a remote schema. |
+| `--out <path>` | Output TypeScript file path (default: `core/api/generated.ts`). |
+| `--prefix <prefix>` | Route path prefix to strip from generated client tree (default: `/api`). |
+| `--url <baseUrl>` | Default base API URL (default: inferred from `dex.config.ts` `apiUrl` or `PUBLIC_API_URL`). |
+
+### Examples
+
+```bash
+# Generate from local OpenAPI file
+dex pie generate ./openapi.json
+
+# Generate from remote URL
+dex pie generate https://api.example.com/openapi.json
+
+# Custom output path and prefix
+dex pie generate ./openapi.json --out core/api/client.ts --prefix /v1
 ```
 
 ---
@@ -197,6 +320,7 @@ The Dex CLI supports the following environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `DEX_HOME` | Custom installation and multi-version storage directory | `~/.dex` |
 | `DEX_TEMPLATE_REPO` | Default GitHub template repository (`owner/repo`) | `patrickaigbogun/dex` |
 | `DEX_TEMPLATE_TGZ` | Path to local template `.tgz` archive (skips GitHub API) | — |
 | `DEX_TEMPLATE_URL` | Direct URL to template `.tgz` archive (skips GitHub API) | — |
