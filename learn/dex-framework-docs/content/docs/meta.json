@@ -40,6 +40,9 @@
     "scaffold": "Scaffold",
     "commands": "Commands"
   },
+  "pie": {
+    "index": "Pie (API Client)"
+  },
   "recipes": {
     "index": "Recipes",
     "custom-structure": "Custom Project Structure",
