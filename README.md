@@ -4,6 +4,7 @@ Dex is a composable, Bun-first framework stack for building small full‑stack a
 - `@dex/router`: file-based React router + generator
 - `@dex/server`: Elysia helpers (assets, SPA fallback, dev reload)
 - `@dex/dev`: tiny dev process supervisor
+- `@dex/pie`: framework-agnostic typed route-tree API client and OpenAPI code generator
 
 Dex is made of composable **packages** (that’s the framework), but distribution is **GitHub-only**:
 

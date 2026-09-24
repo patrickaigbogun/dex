@@ -18,4 +18,4 @@ title: "Dev"
 
 ## Starter usage
 
-- `templates/starter/scripts/dev.ts`
+- `templates/starter/core/bootstrap/dev.ts`
