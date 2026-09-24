@@ -17,6 +17,7 @@ export type Params = Record<string, string | string[]>
 export type Metadata = {
 	title?: string
 	description?: string
+	renderStrategy?: RenderStrategy
 }
 
 /**
@@ -52,7 +53,7 @@ export type LayoutSelector = LayoutName | (() => LayoutName)
  *
  * @example
  * ```ts
- * export default function GlobalLayout({ children }: { children: any }) {
+ * export default function DashboardLayout({ children }: { children: any }) {
  *   return <div className="layout">{children}</div>
  * }
  * ```
@@ -63,13 +64,31 @@ export type LayoutModule = {
 }
 
 /**
- * Runtime context exposed to hooks like `useParams` and `useLocation`.
+ * Navigation options for programmatic navigation.
+ */
+export type NavigateOptions = {
+	/** If true, replaces the current history entry instead of pushing a new one. */
+	replace?: boolean
+}
+
+/**
+ * Prefetch behavior strategy for links.
+ * - `intent`: prefetch on hover (debounced) or focus (default)
+ * - `render`: prefetch immediately when link renders
+ * - `none` / `false`: disable prefetching
+ */
+export type PrefetchStrategy = 'intent' | 'render' | 'none' | boolean
+
+/**
+ * Runtime context exposed to hooks like `useParams`, `useLocation`, and `useQuery`.
  */
 export type RouteContext = {
 	pathname: string
 	search: string
+	hash: string
 	params: Params
 	query: URLSearchParams
+	isNavigating: boolean
 }
 
 /**
@@ -91,3 +110,4 @@ export type Route = {
 	segments: RouteSegment[]
 	importPage: () => Promise<PageModule>
 }
+

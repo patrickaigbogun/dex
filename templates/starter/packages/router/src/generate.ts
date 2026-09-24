@@ -2,6 +2,8 @@ import { readdir, mkdir } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import path from 'node:path'
 
+import { DEFAULT_PATHS, loadDexConfig, resolveFromRoot } from './config'
+
 type RouteSegment =
 	| { kind: 'static'; value: string }
 	| { kind: 'param'; name: string }
@@ -29,7 +31,7 @@ function isIgnoredRouteFile(relPosix: string) {
 	return parts.some((p) => p.startsWith('_'))
 }
 
-function parseSegment(seg: string): RouteSegment {
+export function parseSegment(seg: string): RouteSegment {
 	if (seg.startsWith('[...') && seg.endsWith(']')) {
 		return { kind: 'catchAll', name: seg.slice(4, -1) }
 	}
@@ -39,7 +41,7 @@ function parseSegment(seg: string): RouteSegment {
 	return { kind: 'static', value: seg }
 }
 
-function fileToRoute(relPosixNoExt: string) {
+export function fileToRoute(relPosixNoExt: string) {
 	// Nuxt-like: folder/index => /folder, and root index => /
 	let p = relPosixNoExt
 	if (p === 'index') p = ''
@@ -50,6 +52,60 @@ function fileToRoute(relPosixNoExt: string) {
 	const segments = segs.map(parseSegment)
 
 	return { path: urlPath === '/' ? '/' : urlPath.replace(/\/+$/g, ''), segments }
+}
+
+export function getSegmentScore(seg: RouteSegment): number {
+	switch (seg.kind) {
+		case 'static':
+			return 3
+		case 'param':
+			return 2
+		case 'catchAll':
+			return 1
+	}
+}
+
+export function compareRouteSegments(a: RouteSegment[], b: RouteSegment[]): number {
+	const minLen = Math.min(a.length, b.length)
+	for (let i = 0; i < minLen; i++) {
+		const segA = a[i]!
+		const segB = b[i]!
+
+		const scoreA = getSegmentScore(segA)
+		const scoreB = getSegmentScore(segB)
+
+		if (scoreA !== scoreB) {
+			// Higher score comes first (descending)
+			return scoreB - scoreA
+		}
+
+		// Same kind
+		if (segA.kind === 'static' && segB.kind === 'static') {
+			const cmp = segA.value.localeCompare(segB.value)
+			if (cmp !== 0) return cmp
+		} else if (segA.kind === 'param' && segB.kind === 'param') {
+			const cmp = segA.name.localeCompare(segB.name)
+			if (cmp !== 0) return cmp
+		} else if (segA.kind === 'catchAll' && segB.kind === 'catchAll') {
+			const cmp = segA.name.localeCompare(segB.name)
+			if (cmp !== 0) return cmp
+		}
+	}
+
+	// More specific route (more segments) comes first
+	if (a.length !== b.length) {
+		return b.length - a.length
+	}
+
+	return 0
+}
+
+export function sortRoutesByPrecedence<T extends { segments: RouteSegment[]; path: string }>(routes: T[]): T[] {
+	return routes.sort((a, b) => {
+		const cmp = compareRouteSegments(a.segments, b.segments)
+		if (cmp !== 0) return cmp
+		return a.path.localeCompare(b.path)
+	})
 }
 
 async function walk(dirAbs: string): Promise<string[]> {
@@ -74,7 +130,7 @@ async function walkIfExists(dirAbs: string): Promise<string[]> {
 	}
 }
 
-function fileToLayoutName(relPosixNoExt: string) {
+export function fileToLayoutName(relPosixNoExt: string) {
 	let n = relPosixNoExt
 	if (n.endsWith('/index')) n = n.slice(0, -'/index'.length)
 	return n
@@ -96,8 +152,13 @@ export async function generateLayouts(opts?: {
 	layoutsDir?: string
 	outTs?: string
 }) {
-	const layoutsDirAbs = path.resolve(opts?.layoutsDir ?? './web/layouts')
-	const outTsAbs = path.resolve(opts?.outTs ?? './core/router/.generated/layouts.ts')
+	const { config, root } = await loadDexConfig()
+
+	const layoutsDirInput = opts?.layoutsDir ?? config.layoutsDir ?? DEFAULT_PATHS.layoutsDir
+	const outTsInput = opts?.outTs ?? config.outLayoutsTs ?? DEFAULT_PATHS.outLayoutsTs
+
+	const layoutsDirAbs = resolveFromRoot(root, layoutsDirInput)
+	const outTsAbs = resolveFromRoot(root, outTsInput)
 
 	const filesAbs = (await walkIfExists(layoutsDirAbs)).filter(isLayoutModuleFile)
 
@@ -120,7 +181,7 @@ export async function generateLayouts(opts?: {
 
 	await mkdir(path.dirname(outTsAbs), { recursive: true })
 
-	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(process.cwd(), layoutsDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { LayoutModule } from '@dex/router'\n\nexport const layouts: Record<string, () => Promise<LayoutModule>> = {\n${layouts
+	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(root, layoutsDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { LayoutModule } from '@dex/router'\n\nexport const layouts: Record<string, () => Promise<LayoutModule>> = {\n${layouts
 		.map((l) => `  ${JSON.stringify(l.name)}: () => import(${JSON.stringify(l.importPath)}),`)
 		.join('\n')}\n}\n`
 
@@ -135,9 +196,15 @@ export async function generateFsRoutes(opts?: {
 	outTs?: string
 	outJson?: string
 }) {
-	const pagesDirAbs = path.resolve(opts?.pagesDir ?? './web/pages')
-	const outTsAbs = path.resolve(opts?.outTs ?? './core/router/.generated/routes.ts')
-	const outJsonAbs = path.resolve(opts?.outJson ?? './core/router/.generated/manifest.json')
+	const { config, root } = await loadDexConfig()
+
+	const pagesDirInput = opts?.pagesDir ?? config.pagesDir ?? DEFAULT_PATHS.pagesDir
+	const outTsInput = opts?.outTs ?? config.outRoutesTs ?? DEFAULT_PATHS.outRoutesTs
+	const outJsonInput = opts?.outJson ?? config.outRoutesJson ?? DEFAULT_PATHS.outRoutesJson
+
+	const pagesDirAbs = resolveFromRoot(root, pagesDirInput)
+	const outTsAbs = resolveFromRoot(root, outTsInput)
+	const outJsonAbs = resolveFromRoot(root, outJsonInput)
 
 	const filesAbs = (await walk(pagesDirAbs)).filter((f) => f.endsWith('.tsx'))
 
@@ -155,11 +222,11 @@ export async function generateFsRoutes(opts?: {
 		routes.push({ file: rel, path: routePath, segments, importPath: importPathNormalized })
 	}
 
-	routes.sort((a, b) => a.path.localeCompare(b.path))
+	sortRoutesByPrecedence(routes)
 
 	await mkdir(path.dirname(outTsAbs), { recursive: true })
 
-	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(process.cwd(), pagesDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { Route } from '@dex/router'\n\nexport const routes: Route[] = [\n${routes
+	const ts = `/* eslint-disable */\n// AUTO-GENERATED. DO NOT EDIT.\n// Source: ${toPosix(path.relative(root, pagesDirAbs))}\n// Generated at: ${new Date().toISOString()}\n\nimport type { Route } from '@dex/router'\n\nexport const routes: Route[] = [\n${routes
 		.map(
 			(r) => `  {\n    file: ${JSON.stringify(r.file)},\n    path: ${JSON.stringify(r.path)},\n    segments: ${JSON.stringify(r.segments)},\n    importPage: () => import(${JSON.stringify(r.importPath)}),\n  }`
 		)
@@ -167,7 +234,7 @@ export async function generateFsRoutes(opts?: {
 
 	const json = JSON.stringify(
 		{
-			source: toPosix(path.relative(process.cwd(), pagesDirAbs)),
+			source: toPosix(path.relative(root, pagesDirAbs)),
 			generatedAt: new Date().toISOString(),
 			routes: routes.map(({ file, path, segments }) => ({ file, path, segments })),
 		},
@@ -194,8 +261,13 @@ export async function watchAndGenerate(opts?: {
 	let needsRerun = false
 	const watchers = new Map<string, ReturnType<typeof watch>>()
 
-	const pagesRoot = path.resolve(opts?.pagesDir ?? './web/pages')
-	const layoutsRoot = path.resolve(opts?.layoutsDir ?? './web/layouts')
+	const { config, root } = await loadDexConfig()
+
+	const pagesDirInput = opts?.pagesDir ?? config.pagesDir ?? DEFAULT_PATHS.pagesDir
+	const layoutsDirInput = opts?.layoutsDir ?? config.layoutsDir ?? DEFAULT_PATHS.layoutsDir
+
+	const pagesRoot = resolveFromRoot(root, pagesDirInput)
+	const layoutsRoot = resolveFromRoot(root, layoutsDirInput)
 
 	const ensureWatched = async () => {
 		const seen = new Set<string>()

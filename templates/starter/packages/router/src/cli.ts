@@ -1,4 +1,5 @@
 import { generateFsRoutes, generateLayouts, watchAndGenerate } from './generate'
+import { loadDexConfig } from './config'
 
 function help() {
 	console.log(`dex-router
@@ -13,6 +14,13 @@ Options:
   --outRoutesTs <path>
   --outRoutesJson <path>
   --outLayoutsTs <path>
+
+Paths are resolved with this precedence:
+  1. CLI flags
+  2. Values from dex.config.* (nearest)
+  3. Built-in defaults
+
+All paths are relative to the directory containing the dex.config file (project root).
 `)
 }
 
@@ -28,11 +36,21 @@ if (!cmd || cmd === '-h' || cmd === '--help') {
 	process.exit(0)
 }
 
-const pagesDir = getArg('--pagesDir')
-const layoutsDir = getArg('--layoutsDir')
-const outRoutesTs = getArg('--outRoutesTs')
-const outRoutesJson = getArg('--outRoutesJson')
-const outLayoutsTs = getArg('--outLayoutsTs')
+const { config } = await loadDexConfig()
+
+type PathKey = 'pagesDir' | 'layoutsDir' | 'outRoutesTs' | 'outRoutesJson' | 'outLayoutsTs'
+
+function getValue(flag: string, configKey: PathKey): string | undefined {
+	const fromFlag = getArg(flag)
+	if (fromFlag !== undefined) return fromFlag
+	return config[configKey]
+}
+
+const pagesDir = getValue('--pagesDir', 'pagesDir')
+const layoutsDir = getValue('--layoutsDir', 'layoutsDir')
+const outRoutesTs = getValue('--outRoutesTs', 'outRoutesTs')
+const outRoutesJson = getValue('--outRoutesJson', 'outRoutesJson')
+const outLayoutsTs = getValue('--outLayoutsTs', 'outLayoutsTs')
 
 if (cmd === 'generate') {
 	await generateFsRoutes({ pagesDir, outTs: outRoutesTs, outJson: outRoutesJson })

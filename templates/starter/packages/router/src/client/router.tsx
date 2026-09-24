@@ -1,20 +1,38 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import React, {
+	createContext,
+	useContext,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useTransition,
+	startTransition as reactStartTransition,
+} from 'react'
 
 import type {
 	LayoutModule,
 	LayoutSelector,
 	Metadata,
+	NavigateOptions,
+	PageModule,
 	Params,
+	PrefetchStrategy,
 	Route,
 	RouteContext,
 	RouteSegment,
 } from '../types'
 
+// Module-level caches for instant route and layout resolution
+const pageModuleCache = new Map<string, PageModule | Promise<PageModule>>()
+const layoutModuleCache = new Map<string, LayoutModule | Promise<LayoutModule>>()
+
 type RouterState = RouteContext & {
-	navigate: (to: string) => void
+	navigate: (to: string, options?: NavigateOptions) => void
+	prefetch: (to: string) => Promise<void>
 }
 
 const RouterContext = createContext<RouterState | null>(null)
+const OutletContext = createContext<any>(null)
 
 function hasUnsafeScheme(to: string) {
 	const s = to.trim().toLowerCase()
@@ -33,6 +51,12 @@ function isExternalTo(to: string) {
 	}
 }
 
+function isDataSaverEnabled(): boolean {
+	if (typeof navigator === 'undefined') return false
+	const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection
+	return Boolean(conn?.saveData)
+}
+
 function normalizeRelForTargetBlank(rel: string | undefined, target: string | undefined) {
 	if (target !== '_blank') return rel
 	const tokens = new Set(
@@ -46,19 +70,27 @@ function normalizeRelForTargetBlank(rel: string | undefined, target: string | un
 	return Array.from(tokens).join(' ')
 }
 
-function normalizePathname(p: string) {
+export function normalizePathname(p: string): string {
 	if (!p) return '/'
 	if (p !== '/' && p.endsWith('/')) return p.slice(0, -1)
 	return p
 }
 
-function splitPathname(pathname: string) {
+export function splitPathname(pathname: string): string[] {
 	const p = normalizePathname(pathname)
 	if (p === '/') return []
 	return p.split('/').filter(Boolean)
 }
 
-function matchRoute(segments: RouteSegment[], pathname: string): Params | null {
+function safeDecode(val: string): string {
+	try {
+		return decodeURIComponent(val)
+	} catch {
+		return val
+	}
+}
+
+export function matchRoute(segments: RouteSegment[], pathname: string): Params | null {
 	const parts = splitPathname(pathname)
 	const params: Params = {}
 
@@ -72,13 +104,13 @@ function matchRoute(segments: RouteSegment[], pathname: string): Params | null {
 
 		if (seg.kind === 'param') {
 			if (i >= parts.length) return null
-			params[seg.name] = decodeURIComponent(parts[i]!)
+			params[seg.name] = safeDecode(parts[i]!)
 			i++
 			continue
 		}
 
 		// catchAll
-		params[seg.name] = parts.slice(i).map((x) => decodeURIComponent(x))
+		params[seg.name] = parts.slice(i).map(safeDecode)
 		i = parts.length
 		break
 	}
@@ -87,9 +119,19 @@ function matchRoute(segments: RouteSegment[], pathname: string): Params | null {
 	return params
 }
 
+export function findMatchingRoute(routes: Route[], pathname: string): { route: Route; params: Params } | null {
+	for (const r of routes) {
+		const params = matchRoute(r.segments, pathname)
+		if (params) return { route: r, params }
+	}
+	return null
+}
+
 function applyMetadata(meta?: Metadata) {
-	if (!meta) return
-	if (typeof meta.title === 'string') document.title = meta.title
+	if (!meta || typeof document === 'undefined') return
+	if (typeof meta.title === 'string') {
+		document.title = meta.title
+	}
 
 	if (typeof meta.description === 'string') {
 		let tag = document.querySelector('meta[name="description"]') as HTMLMetaElement | null
@@ -115,56 +157,199 @@ function resolveLayoutName(sel: LayoutSelector | undefined): string | undefined 
 	}
 }
 
-function getDefaultExport(mod: LayoutModule | any) {
-	return (mod as any)?.default ?? mod
+function getDefaultExport(mod: any) {
+	return mod?.default ?? mod
+}
+
+async function loadPageModule(route: Route): Promise<any> {
+	const cached = pageModuleCache.get(route.file)
+	if (cached) return cached
+
+	const promise = route.importPage().then((mod) => {
+		pageModuleCache.set(route.file, mod)
+		return mod
+	})
+	pageModuleCache.set(route.file, promise)
+	return promise
+}
+
+async function loadLayoutModule(
+	name: string,
+	layoutsMap?: Record<string, () => Promise<LayoutModule>>
+): Promise<any> {
+	const cached = layoutModuleCache.get(name)
+	if (cached) return cached
+
+	if (!layoutsMap || !layoutsMap[name]) return undefined
+
+	const loader = layoutsMap[name]!
+	const promise = loader().then((mod) => {
+		layoutModuleCache.set(name, mod)
+		return mod
+	})
+	layoutModuleCache.set(name, promise)
+	return promise
 }
 
 /**
  * Access route params from the current match.
  */
-export function useParams<T extends Params = Params>() {
+export function useParams<T extends Params = Params>(): T {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useParams must be used within <FileRouter />')
 	return ctx.params as T
 }
 
 /**
- * Access the current URL query params as URLSearchParams.
+ * Access the current URL query params as a standard URLSearchParams object.
  */
-export function useQuery() {
+export function useQuery(): URLSearchParams {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useQuery must be used within <FileRouter />')
 	return ctx.query
 }
 
 /**
- * Access the current location (pathname + search).
+ * Access the current location (pathname, search, hash).
  */
-export function useLocation() {
+export function useLocation(): { pathname: string; search: string; hash: string } {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useLocation must be used within <FileRouter />')
-	return { pathname: ctx.pathname, search: ctx.search }
+	return { pathname: ctx.pathname, search: ctx.search, hash: ctx.hash }
+}
+
+/**
+ * Returns true if a route transition is actively loading in the background.
+ */
+export function useIsNavigating(): boolean {
+	const ctx = useContext(RouterContext)
+	if (!ctx) throw new Error('useIsNavigating must be used within <FileRouter />')
+	return ctx.isNavigating
+}
+
+/**
+ * Returns the entire current router state.
+ */
+export function useRouterState(): RouterState {
+	const ctx = useContext(RouterContext)
+	if (!ctx) throw new Error('useRouterState must be used within <FileRouter />')
+	return ctx
 }
 
 /**
  * Programmatic navigation within the file router.
  */
-export function useNavigate() {
+export function useNavigate(): (to: string, options?: NavigateOptions) => void {
 	const ctx = useContext(RouterContext)
 	if (!ctx) throw new Error('useNavigate must be used within <FileRouter />')
 	return ctx.navigate
 }
 
 /**
- * Client-side link that routes via the FileRouter context.
+ * Prefetch a route ahead of time into memory.
  */
-export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) {
+export function usePrefetch(): (to: string) => Promise<void> {
 	const ctx = useContext(RouterContext)
-	const { to, onClick, target, rel, ...rest } = props
+	if (!ctx) throw new Error('usePrefetch must be used within <FileRouter />')
+	return ctx.prefetch
+}
+
+/**
+ * Outlet component for nested layout rendering.
+ */
+export function Outlet<T = any>(props: { context?: T }) {
+	const currentChild = useContext(OutletContext)
+	if (props.context !== undefined) {
+		return <OutletContext.Provider value={props.context}>{currentChild}</OutletContext.Provider>
+	}
+	return currentChild ?? null
+}
+
+/**
+ * Access context passed to an `<Outlet context={...} />`.
+ */
+export function useOutletContext<T = any>(): T {
+	return useContext(OutletContext) as T
+}
+
+export type LinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+	to: string
+	replace?: boolean
+	prefetch?: PrefetchStrategy
+}
+
+/**
+ * Client-side link that routes via the FileRouter context with automatic prefetching.
+ */
+export function Link(props: LinkProps) {
+	const ctx = useContext(RouterContext)
+	const { to, replace, prefetch = 'intent', onClick, onMouseEnter, onMouseLeave, onFocus, target, rel, ...rest } = props
+
+	const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const unsafe = hasUnsafeScheme(to)
 	const href = unsafe ? '#' : to
 	const finalRel = normalizeRelForTargetBlank(rel, target)
+
+	const shouldPrefetch = prefetch !== 'none' && prefetch !== false && !isDataSaverEnabled()
+
+	const doPrefetch = () => {
+		if (shouldPrefetch && ctx && !unsafe && !isExternalTo(to)) {
+			ctx.prefetch(to).catch(() => {})
+		}
+	}
+
+	useEffect(() => {
+		if (prefetch === 'render' && shouldPrefetch) {
+			doPrefetch()
+		}
+		return () => {
+			if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+		}
+	}, [to, prefetch, shouldPrefetch])
+
+	const handleMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
+		onMouseEnter?.(e)
+		if (shouldPrefetch && prefetch !== 'render') {
+			// Debounce hover prefetch by 65ms to ignore rapid mouse sweeping
+			if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+			hoverTimerRef.current = setTimeout(() => {
+				doPrefetch()
+			}, 65)
+		}
+	}
+
+	const handleMouseLeave = (e: React.MouseEvent<HTMLAnchorElement>) => {
+		onMouseLeave?.(e)
+		if (hoverTimerRef.current) {
+			clearTimeout(hoverTimerRef.current)
+			hoverTimerRef.current = null
+		}
+	}
+
+	const handleFocus = (e: React.FocusEvent<HTMLAnchorElement>) => {
+		onFocus?.(e)
+		if (shouldPrefetch) {
+			doPrefetch()
+		}
+	}
+
+	const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+		onClick?.(e)
+		if (e.defaultPrevented) return
+		if (unsafe) {
+			e.preventDefault()
+			return
+		}
+		// If no router is mounted (e.g. SSG/SSR render), behave like a normal <a>.
+		if (!ctx) return
+		if (isExternalTo(to)) return
+		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+		if (target && target !== '_self') return
+
+		e.preventDefault()
+		ctx.navigate(to, { replace })
+	}
 
 	return (
 		<a
@@ -172,20 +357,10 @@ export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to
 			target={target}
 			rel={finalRel}
 			href={href}
-			onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-				onClick?.(e)
-				if (e.defaultPrevented) return
-				if (unsafe) {
-					e.preventDefault()
-					return
-				}
-				// If no router is mounted (e.g. SSG/SSR render), behave like a normal <a>.
-				if (!ctx) return
-				if (isExternalTo(to)) return
-				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-				e.preventDefault()
-				ctx.navigate(to)
-			}}
+			onClick={handleClick}
+			onMouseEnter={handleMouseEnter}
+			onMouseLeave={handleMouseLeave}
+			onFocus={handleFocus}
 		/>
 	)
 }
@@ -193,9 +368,8 @@ export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to
 /**
  * Client-only render boundary.
  *
- * Useful for SSG pages that contain “dynamic/island” components.
- * This avoids hydration mismatches by rendering `fallback` on the server
- * and on the initial client render, then switching to `children` after mount.
+ * Useful for SSG pages that contain dynamic/browser-only components.
+ * Renders fallback on the server/initial paint, then switches to children after mount.
  */
 export function ClientOnly(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
 	const { children, fallback = null } = props
@@ -217,6 +391,13 @@ export function clientOnly<P extends {}>(Component: React.ComponentType<P>, fall
 	}
 }
 
+type LoadedRouteView = {
+	file: string
+	path: string
+	Page: React.ComponentType<any>
+	Layout?: React.ComponentType<{ children: React.ReactNode }>
+}
+
 /**
  * Props for the file-based router runtime.
  */
@@ -230,119 +411,170 @@ export type FileRouterProps = {
 }
 
 /**
- * File-based router that renders pages and layouts by route match.
+ * File-based router that renders pages and layouts with zero-flicker concurrent transitions.
  */
 export function FileRouter(props: FileRouterProps) {
 	const [loc, setLoc] = useState(() => ({
-		pathname: normalizePathname(window.location.pathname),
-		search: window.location.search ?? '',
+		pathname: typeof window !== 'undefined' ? normalizePathname(window.location.pathname) : '/',
+		search: typeof window !== 'undefined' ? (window.location.search ?? '') : '',
+		hash: typeof window !== 'undefined' ? (window.location.hash ?? '') : '',
 	}))
 
+	const [isPending, startTransition] = useTransition?.() ?? [false, reactStartTransition]
+	const [isRouteLoading, setIsRouteLoading] = useState(false)
+
+	const [loadedView, setLoadedView] = useState<LoadedRouteView | null>(null)
+	const [loadError, setLoadError] = useState<unknown>(null)
+
 	useEffect(() => {
-		const onPop = () =>
+		if (typeof window === 'undefined') return
+		const onPop = () => {
 			setLoc({
 				pathname: normalizePathname(window.location.pathname),
 				search: window.location.search ?? '',
+				hash: window.location.hash ?? '',
 			})
+		}
 		window.addEventListener('popstate', onPop)
 		return () => window.removeEventListener('popstate', onPop)
 	}, [])
 
-	const navigate = (to: string) => {
+	const navigate = (to: string, options?: NavigateOptions) => {
+		if (typeof window === 'undefined') return
 		const url = new URL(to, window.location.origin)
-		window.history.pushState({}, '', url)
-		window.dispatchEvent(new PopStateEvent('popstate'))
+		const nextPath = normalizePathname(url.pathname)
+
+		if (options?.replace) {
+			window.history.replaceState({}, '', url.href)
+		} else {
+			window.history.pushState({}, '', url.href)
+		}
+
+		setLoc({
+			pathname: nextPath,
+			search: url.search ?? '',
+			hash: url.hash ?? '',
+		})
 	}
 
-	const ctxBase: Omit<RouteContext, 'params'> = useMemo(
-		() => ({
-			pathname: loc.pathname,
-			search: loc.search,
-			query: new URLSearchParams(loc.search),
-		}),
-		[loc.pathname, loc.search]
-	)
+	const prefetch = async (to: string): Promise<void> => {
+		try {
+			const url = new URL(to, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+			const targetPath = normalizePathname(url.pathname)
+			const match = findMatchingRoute(props.routes, targetPath)
+			if (!match) return
+
+			const pageMod = await loadPageModule(match.route)
+			const layoutName = resolveLayoutName(pageMod.layout)
+			if (layoutName && props.layouts) {
+				await loadLayoutModule(layoutName, props.layouts)
+			}
+		} catch {
+			// Silent prefetch failure
+		}
+	}
 
 	const match = useMemo(() => {
-		for (const r of props.routes) {
-			const params = matchRoute(r.segments, loc.pathname)
-			if (params) return { route: r, params }
-		}
-		return null
+		return findMatchingRoute(props.routes, loc.pathname)
 	}, [loc.pathname, props.routes])
 
-	if (!match) return props.notFound ?? <div>404</div>
-
-	type Loaded = {
-		Page: React.ComponentType<any>
-		Layout?: React.ComponentType<{ children: React.ReactNode }>
-	}
-
-	const [loaded, setLoaded] = useState<Loaded | null>(null)
-	const [loadError, setLoadError] = useState<unknown>(null)
-
+	// Asynchronously load route & layout without clearing the previous screen
 	useEffect(() => {
 		let cancelled = false
-		setLoaded(null)
-		setLoadError(null)
+		if (!match) {
+			setLoadError(null)
+			return
+		}
+
+		setIsRouteLoading(true)
 
 		;(async () => {
-			const pageMod: any = await match.route.importPage()
-			applyMetadata(pageMod.metadata)
-			const layoutName = resolveLayoutName(pageMod.layout)
+			try {
+				const pageMod = await loadPageModule(match.route)
+				applyMetadata(pageMod.metadata)
+				const layoutName = resolveLayoutName(pageMod.layout)
 
-			let Layout: Loaded['Layout']
-			if (layoutName && props.layouts) {
-				const loader = props.layouts[layoutName]
-				if (typeof loader === 'function') {
-					const layoutMod = await loader()
-					Layout = getDefaultExport(layoutMod)
-				} else {
-					console.warn(`[dex-router] unknown layout: ${layoutName}`)
+				let Layout: LoadedRouteView['Layout']
+				if (layoutName && props.layouts) {
+					const layoutMod = await loadLayoutModule(layoutName, props.layouts)
+					if (layoutMod) {
+						Layout = getDefaultExport(layoutMod)
+					} else {
+						console.warn(`[dex-router] unknown layout: ${layoutName}`)
+					}
+				}
+
+				const Page = pageMod.default
+				if (!Page) throw new Error(`Route module missing default export: ${match.route.file}`)
+
+				if (!cancelled) {
+					// Use startTransition to commit the new route view concurrently
+					startTransition(() => {
+						setLoadedView({
+							file: match.route.file,
+							path: match.route.path,
+							Page,
+							Layout,
+						})
+						setLoadError(null)
+						setIsRouteLoading(false)
+					})
+				}
+			} catch (err) {
+				if (!cancelled) {
+					setLoadError(err)
+					setIsRouteLoading(false)
+					console.error('[dex-router] failed to load route', err)
 				}
 			}
-
-			const Page = pageMod.default
-			if (!Page) throw new Error(`Route module missing default export: ${match.route.file}`)
-
-			if (!cancelled) setLoaded({ Page, Layout })
-		})().catch((err) => {
-			if (cancelled) return
-			setLoadError(err)
-			console.error('[dex-router] failed to load route', err)
-		})
+		})()
 
 		return () => {
 			cancelled = true
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [match.route.file])
+	}, [match?.route.file, props.layouts])
+
+	const ctxValue: RouterState = useMemo(
+		() => ({
+			pathname: loc.pathname,
+			search: loc.search,
+			hash: loc.hash,
+			params: match?.params ?? {},
+			query: new URLSearchParams(loc.search),
+			isNavigating: isPending || isRouteLoading,
+			navigate,
+			prefetch,
+		}),
+		[loc.pathname, loc.search, loc.hash, match?.params, isPending, isRouteLoading]
+	)
+
+	if (!match) {
+		return (
+			<RouterContext.Provider value={ctxValue}>
+				{props.GlobalLayout ? <props.GlobalLayout>{props.notFound ?? <div>404</div>}</props.GlobalLayout> : (props.notFound ?? <div>404</div>)}
+			</RouterContext.Provider>
+		)
+	}
 
 	const GlobalLayout = props.GlobalLayout
 
-	const body = loadError
-		? props.error
-			? React.createElement(props.error, { error: loadError })
-			: <div>Failed to load route</div>
-		: !loaded
-			? props.loading ?? <div>Loading...</div>
-			: loaded.Layout
-				? (
-					<loaded.Layout>
-						<loaded.Page />
-					</loaded.Layout>
-				)
-				: <loaded.Page />
+	let body: React.ReactNode
+
+	if (loadError) {
+		body = props.error ? React.createElement(props.error, { error: loadError }) : <div>Failed to load route</div>
+	} else if (!loadedView) {
+		// Initial mount only: render loading placeholder if first route has not loaded yet
+		body = props.loading ?? <div>Loading...</div>
+	} else {
+		const { Page, Layout } = loadedView
+		const pageContent = <Page />
+		body = Layout ? <Layout>{pageContent}</Layout> : pageContent
+	}
 
 	return (
-		<RouterContext.Provider
-			value={{
-				...ctxBase,
-				params: match.params,
-				navigate,
-			}}
-		>
+		<RouterContext.Provider value={ctxValue}>
 			{GlobalLayout ? <GlobalLayout>{body}</GlobalLayout> : body}
 		</RouterContext.Provider>
 	)
 }
+
