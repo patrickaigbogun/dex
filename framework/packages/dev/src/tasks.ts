@@ -45,6 +45,68 @@ export async function dexBuildClient({ rootDir, defineArgs = [] }: DexTaskOption
 	if (code !== 0) process.exit(code)
 }
 
+export async function dexBuild({ rootDir, defineArgs = [] }: DexTaskOptions) {
+	// 1. Generate routes
+	const genProc = Bun.spawn(
+		[
+			'bunx',
+			'--bun',
+			'dex-router',
+			'generate',
+			'--pagesDir',
+			'web/pages',
+			'--layoutsDir',
+			'web/layouts',
+			'--outRoutesTs',
+			'core/router/.generated/routes.ts',
+			'--outRoutesJson',
+			'core/router/.generated/manifest.json',
+			'--outLayoutsTs',
+			'core/router/.generated/layouts.ts',
+		],
+		{ 
+			cwd: rootDir, 
+			stdout: 'inherit', 
+			stderr: 'inherit', 
+			stdin: 'inherit' 
+		}
+	)
+	if ((await genProc.exited) !== 0) process.exit(1)
+
+	// 2. Prepare build directory
+	await dexPrepareBuild({ rootDir })
+
+	// 3. Prerender static pages
+	await dexPrerender({ rootDir })
+
+	// 4. Build CSS
+	const cssProc = Bun.spawn(
+		['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'build/assets/styles.css', '--minify'],
+		{ 
+			cwd: rootDir, 
+			stdout: 'inherit', 
+			stderr: 'inherit', 
+			stdin: 'inherit' 
+		}
+	)
+	if ((await cssProc.exited) !== 0) process.exit(1)
+
+	// 5. Build client bundle
+	await dexBuildClient({ rootDir, defineArgs })
+
+	// 6. Build standalone server binary
+	const srvProc = Bun.spawn(
+		['bun', 'build', '--compile', 'core/runtime/server/prod.ts', '--outfile', 'build/server'],
+		{ 
+			cwd: rootDir, 
+			stdout: 'inherit', 
+			stderr: 'inherit', 
+			stdin: 'inherit' 
+		}
+	)
+	if ((await srvProc.exited) !== 0) process.exit(1)
+}
+
 export async function dexDev({ rootDir }: DexTaskOptions) {
 	// Generate routes once before starting watchers
 	const proc = Bun.spawn(

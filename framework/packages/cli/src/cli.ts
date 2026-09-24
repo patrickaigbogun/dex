@@ -975,7 +975,12 @@ async function cmdBuild() {
 	const found = await findProjectRoot(process.cwd())
 	if (!found) throw new Error('Not in a Dex project (missing dex.config.*)')
 	const { cmd, env } = bunCmd()
-	await run(cmd, ['run', 'build'], found.root, env)
+	const bootstrapScripts = path.join(found.root, 'core/bootstrap/scripts.ts')
+	if (existsSync(bootstrapScripts)) {
+		await run(cmd, ['-e', "import('./core/bootstrap/scripts').then(m => m.runBuild())"], found.root, env)
+	} else {
+		await run(cmd, ['run', 'build'], found.root, env)
+	}
 }
 
 async function cmdStart(prod: boolean) {
@@ -989,9 +994,19 @@ async function cmdStart(prod: boolean) {
 	if (typeof extraEnv.PORT !== 'string' && typeof cfg.port === 'number') extraEnv.PORT = String(cfg.port)
 
 	if (prod) {
-		await run(cmd, ['run', 'start'], found.root, extraEnv)
+		const prodServer = path.join(found.root, 'build/server')
+		if (existsSync(prodServer)) {
+			await run(prodServer, [], found.root, extraEnv)
+		} else {
+			await run(cmd, ['run', 'start'], found.root, extraEnv)
+		}
 	} else {
-		await run(cmd, ['run', 'dev'], found.root, extraEnv)
+		const bootstrapScripts = path.join(found.root, 'core/bootstrap/scripts.ts')
+		if (existsSync(bootstrapScripts)) {
+			await run(cmd, ['-e', "import('./core/bootstrap/scripts').then(m => m.runDev())"], found.root, extraEnv)
+		} else {
+			await run(cmd, ['run', 'dev'], found.root, extraEnv)
+		}
 	}
 }
 
