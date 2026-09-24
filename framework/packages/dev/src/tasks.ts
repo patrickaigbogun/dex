@@ -245,8 +245,9 @@ export async function dexPrerender({ rootDir }: DexPrerenderOptions) {
         // However, I need to fetch the component to read metadata.
 		let pageMod: any
         try {
-            if (r.component) {
-               pageMod = await r.component()
+            const importer = r.importPage ?? r.component
+            if (importer) {
+               pageMod = await importer()
             }
         } catch (e) {
             console.warn(`Failed to load component for ${routePath}`, e)
