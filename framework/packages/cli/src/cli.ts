@@ -30,10 +30,17 @@ function usage(exitCode = 0): never {
 Usage:
   dex scaffold <dir>
   dex sync [--interactive]
-	dex tag <patch|minor|major>
+  dex update [version] [--force]
+  dex versions | dex list
+  dex use <version>
+  dex tag <patch|minor|major>
   dex build
   dex start [-p]
   dex pie generate [spec-url-or-file] [--out <path>] [--prefix <prefix>]
+
+Update options:
+  [version]                  Target version/tag (default: latest release)
+  --force                    Force re-download even if already on this version
 
 Pie options:
   --out <path>               Output file path (default: core/api/generated.ts)
@@ -67,6 +74,7 @@ Version:
   --version -f               Show framework template version (if in scaffolded project)
 
 Environment:
+  DEX_HOME                   Custom Dex directory (default: ~/.dex)
   DEX_TEMPLATE_REPO          Default template repo (owner/repo)
 	DEX_TEMPLATE_TGZ           Local template .tgz path (skips GitHub)
 	DEX_TEMPLATE_URL           Template .tgz URL (skips GitHub)
@@ -424,22 +432,47 @@ function cachePathForTemplate(repo: string, tag: string, assetName: string) {
 }
 
 async function downloadToFile(url: string, filePath: string) {
-	const headers: Record<string, string> = {}
-	if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
 	process.stdout.write(`   downloading: ${url}\n`)
-	const res = await fetchWithTimeout(url, { headers, redirect: 'follow' })
+	const res = await fetchWithTimeout(url, { redirect: 'follow' })
 	if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`)
 	if (!res.body) throw new Error(`Download failed (empty body): ${url}`)
 
-	// Stream to disk (avoid buffering large templates in memory)
-	const fromWeb = (Readable as any).fromWeb as ((s: any) => any) | undefined
-	if (fromWeb) {
-		await pipeline(fromWeb(res.body as any), createWriteStream(filePath))
-		return
-	}
+	const totalBytes = Number(res.headers.get('content-length') || 0)
+	const fileStream = createWriteStream(filePath)
+	const reader = res.body.getReader()
+	let receivedBytes = 0
+	let lastLog = 0
 
-	// Fallback: buffer (should be rare)
-	await writeFile(filePath, new Uint8Array(await res.arrayBuffer()))
+	try {
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			if (value) {
+				fileStream.write(Buffer.from(value))
+				receivedBytes += value.length
+				const now = Date.now()
+				if (now - lastLog > 400) {
+					lastLog = now
+					const mb = (receivedBytes / (1024 * 1024)).toFixed(1)
+					if (totalBytes > 0) {
+						const totalMb = (totalBytes / (1024 * 1024)).toFixed(1)
+						const pct = Math.round((receivedBytes / totalBytes) * 100)
+						process.stdout.write(`\r   progress: ${mb} MB / ${totalMb} MB (${pct}%)`)
+					} else {
+						process.stdout.write(`\r   progress: ${mb} MB`)
+					}
+				}
+			}
+		}
+		if (totalBytes > 0) {
+			const totalMb = (totalBytes / (1024 * 1024)).toFixed(1)
+			process.stdout.write(`\r   progress: ${totalMb} MB / ${totalMb} MB (100%)\n`)
+		} else {
+			process.stdout.write(`\r   progress: ${(receivedBytes / (1024 * 1024)).toFixed(1)} MB (done)\n`)
+		}
+	} finally {
+		await new Promise((resolve) => fileStream.end(resolve))
+	}
 }
 
 function cachePathForTemplateUrl(url: string) {
@@ -1094,6 +1127,163 @@ async function cmdPieGenerate(positional: string[], flags: Record<string, string
 	console.log(`\nGenerated typed API route tree: ${path.relative(found.root, generatedPath)} ✓`)
 }
 
+function getDexHome(): string {
+	const fromEnv = process.env.DEX_HOME
+	if (fromEnv && fromEnv.trim()) return path.resolve(fromEnv)
+	return path.join(os.homedir(), '.dex')
+}
+
+function getHostPlatformAsset(): { os: string; arch: string; ext: string; asset: string } {
+	let osName: string = process.platform
+	if (osName === 'linux') osName = 'linux'
+	else if (osName === 'darwin') osName = 'darwin'
+	else if (osName === 'win32') osName = 'windows'
+	else throw new Error(`Unsupported OS platform: ${process.platform}`)
+
+	let archName: string = process.arch
+	if (archName === 'x64') archName = 'x64'
+	else if (archName === 'arm64') archName = 'arm64'
+	else throw new Error(`Unsupported CPU architecture: ${process.arch}`)
+
+	const ext = osName === 'windows' ? '.exe' : ''
+	const asset = `dex-${osName}-${archName}${ext}`
+	return { os: osName, arch: archName, ext, asset }
+}
+
+async function setActiveDexVersion(dexHome: string, version: string, ext = ''): Promise<void> {
+	const versionsDir = path.join(dexHome, 'versions')
+	const targetVersionDir = path.join(versionsDir, version)
+	const targetBinary = path.join(targetVersionDir, `dex${ext}`)
+
+	if (!existsSync(targetBinary)) {
+		throw new Error(`Version ${version} is not installed (expected ${targetBinary})`)
+	}
+
+	const binDir = path.join(dexHome, 'bin')
+	await mkdir(binDir, { recursive: true })
+
+	const currentLink = path.join(dexHome, 'current')
+	const binDex = path.join(binDir, `dex${ext}`)
+
+	const { symlink, unlink, chmod, rm } = await import('node:fs/promises')
+
+	try {
+		await rm(currentLink, { recursive: true, force: true })
+	} catch {}
+
+	if (process.platform === 'win32') {
+		try {
+			await symlink(targetVersionDir, currentLink, 'junction')
+		} catch {
+			// fallback
+		}
+		const cmdContent = `@echo off\r\n"%~dp0\\..\\current\\dex.exe" %*\r\n`
+		await writeFile(path.join(binDir, 'dex.cmd'), cmdContent)
+	} else {
+		await symlink(targetVersionDir, currentLink)
+		try {
+			await unlink(binDex)
+		} catch {}
+		await symlink(path.join(currentLink, 'dex'), binDex)
+		await chmod(targetBinary, 0o755)
+	}
+}
+
+async function cmdUpdate(positional: string[], flags: Record<string, string | boolean>) {
+	const step = createSteps()
+	const repo = repoFromEnvOrFlag(flags)
+	let targetTag = (positional[1] as string | undefined) ?? (flags.tag as string | undefined)
+
+	const dexHome = getDexHome()
+	const { asset, ext } = getHostPlatformAsset()
+
+	if (!targetTag || targetTag === 'latest') {
+		targetTag = await step('Check for latest release', async () => {
+			const release = await githubRelease(repo, 'latest')
+			if (!release?.tag_name) throw new Error(`Could not find latest release for ${repo}`)
+			return release.tag_name as string
+		})
+	}
+
+	if (!targetTag.startsWith('v') && /^\d+\.\d+\.\d+/.test(targetTag)) {
+		targetTag = `v${targetTag}`
+	}
+
+	const cliVer = await getCliVersion()
+	const currentVer = cliVer.startsWith('v') ? cliVer : `v${cliVer}`
+	if (currentVer === targetTag && !flags.force) {
+		console.log(`Already on ${targetTag} (latest) ✓`)
+		return
+	}
+
+	const versionDir = path.join(dexHome, 'versions', targetTag)
+	const destBinary = path.join(versionDir, `dex${ext}`)
+
+	await step(`Download dex ${targetTag} (${asset})`, async () => {
+		await mkdir(versionDir, { recursive: true })
+		const base = `https://github.com/${repo}/releases/download/${encodeURIComponent(targetTag)}/${asset}`
+		const tmp = `${destBinary}.tmp-${process.pid}-${Date.now()}`
+		await downloadToFile(base, tmp)
+		await rename(tmp, destBinary)
+		if (process.platform !== 'win32') {
+			const { chmod } = await import('node:fs/promises')
+			await chmod(destBinary, 0o755)
+		}
+	})
+
+	await step(`Switch active version to ${targetTag}`, async () => {
+		await setActiveDexVersion(dexHome, targetTag, ext)
+	})
+
+	console.log(`\nSuccessfully updated Dex to ${targetTag} in ${dexHome} ✓`)
+	console.log(`Active binary: ${path.join(dexHome, 'bin', `dex${ext}`)}`)
+}
+
+async function cmdVersions() {
+	const dexHome = getDexHome()
+	const versionsDir = path.join(dexHome, 'versions')
+	if (!existsSync(versionsDir)) {
+		console.log(`No versions installed in ${dexHome}`)
+		return
+	}
+	const entries = await readdir(versionsDir)
+	const currentLink = path.join(dexHome, 'current')
+	let activeVersion: string | null = null
+	try {
+		const { readlink } = await import('node:fs/promises')
+		const target = await readlink(currentLink)
+		activeVersion = path.basename(target)
+	} catch {}
+
+	if (entries.length === 0) {
+		console.log(`No versions installed in ${dexHome}`)
+		return
+	}
+
+	console.log(`Dex installed versions (${dexHome}):\n`)
+	for (const v of entries) {
+		if (v === activeVersion) {
+			console.log(`  * ${v} (active)`)
+		} else {
+			console.log(`    ${v}`)
+		}
+	}
+}
+
+async function cmdUse(versionArg?: string) {
+	if (!versionArg) {
+		throw new Error('Usage: dex use <version> (e.g. dex use v0.2.0)')
+	}
+	let tag = versionArg.trim()
+	if (!tag.startsWith('v') && /^\d+\.\d+\.\d+/.test(tag)) {
+		tag = `v${tag}`
+	}
+	const dexHome = getDexHome()
+	const { ext } = getHostPlatformAsset()
+	await setActiveDexVersion(dexHome, tag, ext)
+	console.log(`Now using Dex ${tag} ✓`)
+}
+
 async function main() {
 	const argv = process.argv.slice(2)
 	const { positional, flags } = parseArgs(argv)
@@ -1108,6 +1298,21 @@ async function main() {
 	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') usage(0)
 
 	try {
+		if (cmd === 'update' || cmd === 'upgrade') {
+			await cmdUpdate(positional, flags)
+			return
+		}
+
+		if (cmd === 'versions' || cmd === 'list' || cmd === 'ls') {
+			await cmdVersions()
+			return
+		}
+
+		if (cmd === 'use') {
+			await cmdUse(positional[1])
+			return
+		}
+
 		if (cmd === 'scaffold') {
 			const dir = positional[1]
 			if (!dir) usage(1)
@@ -1155,3 +1360,4 @@ async function main() {
 }
 
 await main()
+

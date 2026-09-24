@@ -1,6 +1,5 @@
 {
-  "name": "dexx-framework docs",
-  "version": "0.0.0",
+  "name": "dex-framework docs",
   "private": true,
   "scripts": {
     "build": "next build",
