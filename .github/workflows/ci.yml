@@ -28,3 +28,7 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
         working-directory: framework
+
+      - name: Run tests
+        run: bun test
+        working-directory: framework
