@@ -5,7 +5,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "echo \"No tests\"",
+    "test": "bun test",
     "changeset": "bunx changeset",
     "version": "bunx changeset version",
     "release": "bunx changeset publish",
