@@ -172,6 +172,7 @@ function buildVercelConfig(subdomains: Record<string, string>): VercelBuildOutpu
 	}
 
 	routes.push(
+		{ src: '/__dev/(.*)', status: 404 },
 		{ src: '/api/(.*)', dest: '/api' },
 		{ handle: 'filesystem' },
 		{ src: '/(.*)', dest: '/index.html' }

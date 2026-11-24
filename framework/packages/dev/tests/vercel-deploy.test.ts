@@ -67,12 +67,14 @@ describe('Vercel Build Output API v3 adapter', () => {
 
 				const routes = parsedConfig.routes as Array<Record<string, any>>
 				const assetsIdx = routes.findIndex((r) => r.src === '/assets/(.*)')
+				const devIdx = routes.findIndex((r) => r.src === '/__dev/(.*)' && r.status === 404)
 				const apiIdx = routes.findIndex((r) => r.src === '/api/(.*)' && r.dest === '/api')
 				const fsIdx = routes.findIndex((r) => r.handle === 'filesystem')
 				const spaIdx = routes.findIndex((r) => r.src === '/(.*)' && r.dest === '/index.html')
 
 				expect(assetsIdx).toBeGreaterThanOrEqual(0)
-				expect(apiIdx).toBeGreaterThan(assetsIdx)
+				expect(devIdx).toBeGreaterThan(assetsIdx)
+				expect(apiIdx).toBeGreaterThan(devIdx)
 				expect(fsIdx).toBeGreaterThan(apiIdx)
 				expect(spaIdx).toBeGreaterThan(fsIdx)
 
@@ -82,6 +84,7 @@ describe('Vercel Build Output API v3 adapter', () => {
 				const indexHtml = await readFile(indexHtmlPath, 'utf8')
 				expect(indexHtml).toMatch(/\/assets\/client\.js\?v=[a-f0-9]+/)
 				expect(indexHtml).toMatch(/\/assets\/styles\.css\?v=[a-f0-9]+/)
+				expect(indexHtml).not.toContain('/__dev/reload')
 
 				// 3. client bundle & ESM chunks assertions
 				const clientJsPath = path.join(outputDir, 'static', 'assets', 'client.js')

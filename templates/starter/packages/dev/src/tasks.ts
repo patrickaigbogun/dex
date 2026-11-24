@@ -309,11 +309,19 @@ export type DexTaskOptions = {
 	noWatch?: boolean
 }
 
+function stripDevReloadScript(html: string): string {
+	return html.replace(
+		/[ \t]*<script\b[^>]*>[\s\S]*?\/__dev\/reload[\s\S]*?<\/script>[ \t]*\r?\n?/gi,
+		''
+	)
+}
+
 export async function dexPrepareBuild({ rootDir }: DexTaskOptions) {
 	const buildDir = path.join(rootDir, 'build')
 	await rm(buildDir, { recursive: true, force: true })
 	await mkdir(path.join(buildDir, 'assets'), { recursive: true })
-	await copyFile(path.join(rootDir, 'web/public/index.html'), path.join(buildDir, 'index.html'))
+	const rawHtml = await readFile(path.join(rootDir, 'web/public/index.html'), 'utf8')
+	await writeFile(path.join(buildDir, 'index.html'), stripDevReloadScript(rawHtml), 'utf8')
 }
 
 export async function dexBuildClient({ rootDir, defineArgs = [] }: DexTaskOptions) {
