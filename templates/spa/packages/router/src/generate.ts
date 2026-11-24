@@ -1,5 +1,5 @@
 import { readdir, mkdir } from 'node:fs/promises'
-import { watch } from 'node:fs'
+import { existsSync, watch } from 'node:fs'
 import path from 'node:path'
 
 import { DEFAULT_PATHS, loadDexConfig, resolveFromRoot } from './config'
@@ -126,7 +126,10 @@ async function walk(dirAbs: string): Promise<string[]> {
 async function walkIfExists(dirAbs: string): Promise<string[]> {
 	try {
 		return await walk(dirAbs)
-	} catch {
+	} catch (err: any) {
+		if (err?.code !== 'ENOENT') {
+			console.warn('[dex-router] watch warning: failed to read directory', dirAbs, err)
+		}
 		return []
 	}
 }
@@ -256,10 +259,17 @@ export async function watchAndGenerate(opts?: {
 	outRoutesTs?: string
 	outRoutesJson?: string
 	outLayoutsTs?: string
-}) {
+	signal?: AbortSignal
+}): Promise<{ stop: () => void }> {
+	if (opts?.signal?.aborted) {
+		return { stop: () => {} }
+	}
+
 	let scheduled: ReturnType<typeof setTimeout> | undefined
 	let running = false
 	let needsRerun = false
+	let pendingRescan = false
+	let stopped = false
 	const watchers = new Map<string, ReturnType<typeof watch>>()
 
 	const { config, root } = await loadDexConfig()
@@ -270,63 +280,144 @@ export async function watchAndGenerate(opts?: {
 	const pagesRoot = resolveFromRoot(root, pagesDirInput)
 	const layoutsRoot = resolveFromRoot(root, layoutsDirInput)
 
+	const stop = () => {
+		if (stopped) return
+		stopped = true
+		if (scheduled) {
+			clearTimeout(scheduled)
+			scheduled = undefined
+		}
+		for (const w of watchers.values()) {
+			try {
+				w.close()
+			} catch (err) {
+				console.warn('[dex-router] watch warning: failed to close watcher:', err)
+			}
+		}
+		watchers.clear()
+		process.off('SIGINT', onSignal)
+		process.off('SIGTERM', onSignal)
+		opts?.signal?.removeEventListener('abort', stop)
+	}
+
+	const onSignal = () => {
+		stop()
+		process.exit(0)
+	}
+
+	process.on('SIGINT', onSignal)
+	process.on('SIGTERM', onSignal)
+	opts?.signal?.addEventListener('abort', stop, { once: true })
+
 	const ensureWatched = async () => {
+		if (stopped) return
 		const seen = new Set<string>()
 
 		const walkDirs = async (dirAbs: string) => {
+			if (stopped) return
 			seen.add(dirAbs)
 			if (!watchers.has(dirAbs)) {
-				const w = watch(dirAbs, (_event, filename) => {
-					if (typeof filename === 'string') {
-						if (!/\.(tsx|ts)$/i.test(filename) || filename.endsWith('.d.ts')) {
-							schedule(true)
-							return
+				try {
+					const w = watch(dirAbs, (_event, filename) => {
+						if (stopped) return
+						if (typeof filename === 'string') {
+							if (!/\.(tsx|ts)$/i.test(filename) || filename.endsWith('.d.ts')) {
+								schedule(true)
+								return
+							}
 						}
+						schedule()
+					})
+					w.on('error', (err) => {
+						console.warn('[dex-router] watcher error on', dirAbs, err)
+						try {
+							w.close()
+						} catch {
+							// ignore
+						}
+						watchers.delete(dirAbs)
+					})
+					watchers.set(dirAbs, w)
+				} catch (err: any) {
+					const code = err?.code
+					if (code === 'EMFILE' || code === 'ENOSPC') {
+						console.warn(
+							`[dex-router] watch warning: file watcher limit reached (${code}) on ${dirAbs}. ` +
+								`On Linux, increase fs.inotify.max_user_watches (e.g. sudo sysctl -w fs.inotify.max_user_watches=524288) ` +
+								`or run with --no-watch in CI.`
+						)
+					} else {
+						console.warn('[dex-router] watch warning: failed to watch directory', dirAbs, err)
 					}
-					schedule()
-				})
-				watchers.set(dirAbs, w)
+				}
 			}
 
-			const entries = await readdir(dirAbs, { withFileTypes: true })
-			for (const e of entries) {
-				if (!e.isDirectory()) continue
-				if (e.name.startsWith('.')) continue
-				await walkDirs(path.join(dirAbs, e.name))
+			try {
+				const entries = await readdir(dirAbs, { withFileTypes: true })
+				for (const e of entries) {
+					if (stopped) return
+					if (!e.isDirectory()) continue
+					if (e.name.startsWith('.')) continue
+					await walkDirs(path.join(dirAbs, e.name))
+				}
+			} catch (err: any) {
+				if (err?.code !== 'ENOENT') {
+					console.warn('[dex-router] watch warning: failed to read directory', dirAbs, err)
+				}
 			}
 		}
 
-		for (const root of [pagesRoot, layoutsRoot]) {
+		for (const rootDir of [pagesRoot, layoutsRoot]) {
+			if (stopped) return
+			if (!existsSync(rootDir)) {
+				if (rootDir === pagesRoot) {
+					console.warn(`[dex-router] watch warning: pages directory does not exist: ${rootDir}`)
+				}
+				continue
+			}
 			try {
-				await walkDirs(root)
-			} catch {
-				// ignore missing roots
+				await walkDirs(rootDir)
+			} catch (err) {
+				console.warn('[dex-router] watch warning: failed to scan directory', rootDir, err)
 			}
 		}
 
 		for (const [dir, w] of watchers) {
 			if (seen.has(dir)) continue
-			w.close()
+			try {
+				w.close()
+			} catch (err) {
+				console.warn('[dex-router] watch warning: failed to close stale watcher on', dir, err)
+			}
 			watchers.delete(dir)
 		}
 	}
 
 	const schedule = (rescanDirs = false) => {
+		if (stopped) return
+		if (rescanDirs) pendingRescan = true
 		if (scheduled) clearTimeout(scheduled)
 		scheduled = setTimeout(async () => {
 			scheduled = undefined
+			if (stopped) return
 			if (running) {
 				needsRerun = true
 				return
 			}
 			running = true
+			const shouldRescan = pendingRescan
+			pendingRescan = false
 			try {
-				if (rescanDirs) await ensureWatched()
-				await generateFsRoutes({
-					pagesDir: opts?.pagesDir,
-					outTs: opts?.outRoutesTs,
-					outJson: opts?.outRoutesJson,
-				})
+				if (shouldRescan) await ensureWatched()
+				if (stopped) return
+				if (existsSync(pagesRoot)) {
+					await generateFsRoutes({
+						pagesDir: opts?.pagesDir,
+						outTs: opts?.outRoutesTs,
+						outJson: opts?.outRoutesJson,
+					})
+				}
+				if (stopped) return
 				await generateLayouts({
 					layoutsDir: opts?.layoutsDir,
 					outTs: opts?.outLayoutsTs,
@@ -336,23 +427,33 @@ export async function watchAndGenerate(opts?: {
 				console.error('[dex-router] generation failed', err)
 			} finally {
 				running = false
-				if (needsRerun) {
+				if (!stopped && needsRerun) {
 					needsRerun = false
-					schedule(rescanDirs)
+					schedule()
 				}
 			}
 		}, 120)
 	}
 
-	await ensureWatched()
-	await generateFsRoutes({ pagesDir: opts?.pagesDir, outTs: opts?.outRoutesTs, outJson: opts?.outRoutesJson })
-	await generateLayouts({ layoutsDir: opts?.layoutsDir, outTs: opts?.outLayoutsTs })
-	console.log('[dex-router] watching pages/layouts for changes')
-
-	const shutdown = () => {
-		for (const w of watchers.values()) w.close()
-		process.exit(0)
+	try {
+		await ensureWatched()
+		if (stopped) {
+			stop()
+			return { stop }
+		}
+		if (existsSync(pagesRoot)) {
+			await generateFsRoutes({ pagesDir: opts?.pagesDir, outTs: opts?.outRoutesTs, outJson: opts?.outRoutesJson })
+		}
+		await generateLayouts({ layoutsDir: opts?.layoutsDir, outTs: opts?.outLayoutsTs })
+		if (stopped) {
+			stop()
+			return { stop }
+		}
+		console.log('[dex-router] watching pages/layouts for changes')
+	} catch (err) {
+		stop()
+		throw err
 	}
-	process.on('SIGINT', shutdown)
-	process.on('SIGTERM', shutdown)
+
+	return { stop }
 }

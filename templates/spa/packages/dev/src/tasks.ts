@@ -306,6 +306,7 @@ async function updateBuildHtmlCacheBusting(buildDir: string, clientHash: string 
 export type DexTaskOptions = {
 	rootDir: string
 	defineArgs?: string[]
+	noWatch?: boolean
 }
 
 export async function dexPrepareBuild({ rootDir }: DexTaskOptions) {
@@ -415,10 +416,11 @@ export async function dexBuild({ rootDir, defineArgs = [] }: DexTaskOptions) {
 	if ((await srvProc.exited) !== 0) process.exit(1)
 }
 
-export async function dexDev({ rootDir, defineArgs }: DexTaskOptions) {
+export async function dexDev({ rootDir, defineArgs, noWatch }: DexTaskOptions) {
 	const resolvedDefineArgs = defineArgs && defineArgs.length > 0 ? defineArgs : getPublicEnvDefines(rootDir)
+	const disableWatch = Boolean(noWatch || process.argv.includes('--no-watch') || process.env.DEX_NO_WATCH === '1')
 
-	// Generate routes once before starting watchers
+	// Generate routes once before starting watchers (or single-shot build)
 	const proc = Bun.spawn(
 		[
 			'bunx',
@@ -436,7 +438,7 @@ export async function dexDev({ rootDir, defineArgs }: DexTaskOptions) {
 			'--outLayoutsTs',
 			'core/router/.generated/layouts.ts',
 		],
-		{ 
+		{
 			cwd: rootDir,
 			stdout: 'inherit',
 			stderr: 'inherit',
@@ -445,6 +447,67 @@ export async function dexDev({ rootDir, defineArgs }: DexTaskOptions) {
 	)
 	const code = await proc.exited
 	if (code !== 0) process.exit(code)
+
+	if (disableWatch) {
+		const cssProc = Bun.spawn(
+			['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'web/public/assets/styles.css'],
+			{
+				cwd: rootDir,
+				stdout: 'inherit',
+				stderr: 'inherit',
+				stdin: 'inherit',
+			}
+		)
+		const cssCode = await cssProc.exited
+		if (cssCode !== 0) process.exit(cssCode)
+
+		const clientProc = Bun.spawn(
+			[
+				'bun',
+				'build',
+				'core/bootstrap/web.tsx',
+				'--target',
+				'browser',
+				'--splitting',
+				'--format',
+				'esm',
+				'--outdir',
+				'web/public/assets',
+				'--entry-naming',
+				'client.[ext]',
+				...resolvedDefineArgs,
+			],
+			{
+				cwd: rootDir,
+				stdout: 'inherit',
+				stderr: 'inherit',
+				stdin: 'inherit',
+			}
+		)
+		const clientCode = await clientProc.exited
+		if (clientCode !== 0) process.exit(clientCode)
+
+		const srvProc = Bun.spawn(['bun', 'core/runtime/app/index.ts'], {
+			cwd: rootDir,
+			stdout: 'inherit',
+			stderr: 'inherit',
+			stdin: 'inherit',
+		})
+		const forwardSignal = () => {
+			try {
+				srvProc.kill('SIGTERM')
+			} catch {
+				// ignore
+			}
+		}
+		process.on('SIGINT', forwardSignal)
+		process.on('SIGTERM', forwardSignal)
+		const srvCode = await srvProc.exited
+		process.off('SIGINT', forwardSignal)
+		process.off('SIGTERM', forwardSignal)
+		if (srvCode !== 0) process.exit(srvCode)
+		return
+	}
 
 	spawnGroup([
 		{

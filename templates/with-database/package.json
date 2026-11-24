@@ -1,0 +1,27 @@
+{
+  "name": "dex-with-database",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun core/bootstrap/dev.ts",
+    "build": "bun core/bootstrap/build.ts",
+    "start": "NODE_ENV=production ./build/server"
+  },
+  "dependencies": {
+    "@dex/router": "workspace:*",
+    "@dex/pie": "workspace:*",
+    "@dex/server": "workspace:*",
+    "@dex/dev": "workspace:*",
+    "elysia": "^1.4.21",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.18",
+    "@tailwindcss/cli": "^4.1.18",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3"
+  }
+}

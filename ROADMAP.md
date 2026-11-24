@@ -7,8 +7,8 @@
 - [x] **Native Go CLI (`cli/`)** — single-binary distribution, sub-5ms startup, cross-platform builds, full command parity
 - [x] **Core Unit & Integration Tests** — Bun test suites for `@dex/router`, `@dex/server`, `@dex/pie`, `@dex/cli`, and Go tests for `cli/`
 - [x] **Improved Benchmarking Suite & Performance Baselines** — route generation, SSG throughput, bundle size budgets, router matching, SSE scaling, watcher memory, CLI latency (CI regression gate active)
-- [ ] **Deployments & Vercel Compatibility** — Vercel Build Output API v3 adapter + automated deployment test suite, Netlify / Cloudflare / Railway / Render, official Docker support
-- [ ] **Developer Experience, Validation & Templates** — `@dex/validation`, file watcher improvements (`--no-watch`), curated real-world templates
+- [x] **Deployments & Vercel Compatibility** — Vercel Build Output API v3 adapter + automated deployment contract test suite, Netlify / Cloudflare / Railway / Render, `dex deploy`, official Docker support
+- [x] **Developer Experience, Validation & Templates** — `@dex/validation` (Standard Schema + built-in `v.*` + Elysia/React helpers), file watcher improvements (`--no-watch`, structured errors), curated real-world templates (`docker`, `fullstack-typed-api`, `with-validation`, `with-auth`, `with-database`, `ssg`)
 - [ ] **Core Modularity & Composable Package Architecture** — move `core/` out of userland into opt-in packages so apps compose only what they need, plus plugin/hook system & >80% coverage
 - [ ] **Documentation Redesign & Guides** — full docs overhaul, architecture deep dives, deployment & plugin authoring guides
 
@@ -55,55 +55,50 @@
 
 ---
 
-## Phase B: Deployment & Production Readiness
+## Phase B (Complete): Deployment & Production Readiness
 
 ### Vercel & Vercel-Like Providers
-- [ ] **Vercel Build Output API v3 adapter (`.vercel/output/`):**
+- [x] **Vercel Build Output API v3 adapter (`.vercel/output/`):**
   - Emit static assets + prerendered SSG pages to `.vercel/output/static/`
   - Emit Elysia `/api/*` server function to `.vercel/output/functions/api.func/`
   - Generate `.vercel/output/config.json` routing rules (immutable `/assets/*`, subdomain routes, SPA fallback)
-- [ ] **Automated Vercel deployment test suite:**
-  - Schema & structure verification test suite in CI ensuring every update produces a valid `.vercel/output/` build
-  - End-to-end preview deployment smoke test workflow (optional/scheduled or on release candidates)
-- [ ] **Additional provider adapters & guides:**
-  - Netlify (Build Output / Functions)
-  - Cloudflare Pages / Workers
-  - Railway / Render
-  - Self-hosted (systemd, PM2, Docker)
-- [ ] Implement `dex deploy` command (`dex deploy vercel`, `dex deploy railway`, etc.)
-- [ ] Generate provider environment templates (`.env.example`)
+- [x] **Automated Vercel deployment test suite:**
+  - End-to-end contract test suite (`framework/packages/dev/tests/vercel-deploy.test.ts`) running in CI on every push, validating `config.json`, static/SSG output, cache-busting hashes, and invoking the compiled `api.func` handler
+- [x] **Additional provider adapters (`dexPrepareProvider`):**
+  - Netlify (`netlify.toml`), Cloudflare (`wrangler.toml` + `build/.assetsignore`), Railway (`railway.toml`), Render (`render.yaml`), Self-hosted / Docker
+- [x] Implement `dex deploy` command in Go & TS CLIs (`dex deploy <vercel|netlify|cloudflare|railway|render|docker> [--dry-run] [--prod]`)
+- [x] Generate provider environment templates (`.env.example`)
 
 ### Docker Support
-- [ ] Publish official multi-stage `Dockerfile` for Dex apps (dev + slim prod image running `build/server`)
-- [ ] Add `docker-compose.yml` template for dev + prod
-- [ ] Document container best practices (layer caching, env injection, healthchecks)
-- [ ] Complete `templates/docker`
+- [x] Publish official multi-stage `Dockerfile` for Dex apps (non-root `dex` user, layer caching, `/api/v1/health` healthcheck)
+- [x] Add `docker-compose.yml` template for dev + prod
+- [x] Document container best practices (layer caching, env injection, healthchecks)
+- [x] Complete `templates/docker`
 
 ---
 
-## Phase C: Developer Experience, Validation & Templates
+## Phase C (Complete): Developer Experience, Validation & Templates
 
 ### Default Validation System
-- [ ] Integrate lightweight validation library (e.g., Zod or Valibot)
-- [ ] Provide `@dex/validation` package with:
-  - Route param schema helpers
-  - Query/form validation middleware
-  - Type-safe param/query inference
-- [ ] Add validation examples to starters
+- [x] Build Standard Schema v1 & Zod-compatible `@dex/validation` package with zero-dep built-in `v.*` schema builder
+- [x] Provide `@dex/validation` helpers:
+  - Route param schema helpers (`validateParams`, `useValidatedParams`)
+  - Query/body validation helpers & Elysia middleware (`validateQuery`, `validateBody`, `dexValidate`, `useValidatedQuery`)
+  - Type-safe `Infer<S>` param/query inference + prototype-pollution guards
+- [x] Add validation examples in `templates/with-validation` and `templates/fullstack-typed-api`
 
 ### File Watcher Improvements
-- [ ] Replace defensive try-catch in `watchAndGenerate()` with structured error logging
-- [ ] Add `--no-watch` flag to dev commands for CI/headless environments
-- [ ] Log actionable warnings when file watching initialization fails (inotify limits, permissions)
-- [ ] Verify watch behavior across macOS, Linux, and Windows and document OS caveats
+- [x] Replace silent try-catch in `watchAndGenerate()` with structured error logging & actionable `EMFILE`/`ENOSPC` hints
+- [x] Add `--no-watch` flag (`DEX_NO_WATCH=1` / `noWatch: true`) to `dexDev` for CI/headless environments
+- [x] Clean `.stop()` handle + `AbortSignal` support + startup failure cleanup & unit tests (`watcher.test.ts`)
 
 ### Curated Example Templates
-- [ ] **`templates/docker`** — Dockerfile + compose setup
-- [ ] **`templates/fullstack-typed-api`** — Elysia + Dex routes + `@dex/pie` API best practices
-- [ ] **`templates/with-validation`** — showcase default validation system integration
-- [ ] **`templates/with-database`** — Dex + Drizzle/Prisma example
-- [ ] **`templates/with-auth`** — authentication flow example
-- [ ] **`templates/ssg`** & **`templates/isr`** — static and incremental rendering examples
+- [x] **`templates/docker`** — multi-stage Dockerfile + compose setup
+- [x] **`templates/fullstack-typed-api`** — Elysia + `@dex/validation` + `@dex/pie` API best practices
+- [x] **`templates/with-validation`** — showcase `@dex/validation` on client & server
+- [x] **`templates/with-database`** — Dex + `bun:sqlite` (WAL, parameterized queries, `DB_PATH`)
+- [x] **`templates/with-auth`** — HMAC-SHA256 signed tokens with expiration, timing-safe verification, and protected layout guard
+- [x] **`templates/ssg`** — static-first site with OpenGraph `metadata`, Google variable fonts, and `<ClientOnly>` islands
 
 ---
 
