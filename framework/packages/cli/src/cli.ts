@@ -35,6 +35,7 @@ Usage:
   dex use <version>
   dex tag <patch|minor|major>
   dex build
+  dex deploy <vercel|netlify|cloudflare|railway|render|docker> [--dry-run] [--prod]
   dex start [-p]
   dex pie generate [spec-url-or-file] [--out <path>] [--prefix <prefix>]
   dex template <list|cache|diff>
@@ -64,6 +65,10 @@ Sync options:
 
 Start options:
   -p                         Production mode (NODE_ENV=production)
+
+Deploy options:
+  --dry-run                  Prepare deployment artifacts without invoking provider CLI
+  --prod                     Deploy to production (passed through to provider CLI)
 
 Tag options:
 	patch                      Bump SemVer patch (e.g. v0.1.44 -> v0.1.45)
@@ -133,7 +138,7 @@ export function parseArgs(argv: string[]) {
 			positional.push(a)
 			continue
 		}
-		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f' || a === '--no-cache' || a === '--fresh' || a === '--all' || a === '--force' || a === '--interactive') {
+		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f' || a === '--no-cache' || a === '--fresh' || a === '--all' || a === '--force' || a === '--interactive' || a === '--dry-run' || a === '--prod') {
 			flags[a.replace(/^--?/, '')] = true
 			continue
 		}
@@ -1042,6 +1047,58 @@ async function cmdScaffold(dirArg: string, flags: Record<string, string | boolea
 	process.exit(0)
 }
 
+const VALID_DEPLOY_PROVIDERS = ['vercel', 'netlify', 'cloudflare', 'railway', 'render', 'docker'] as const
+type DeployProviderArg = (typeof VALID_DEPLOY_PROVIDERS)[number]
+
+function deployCommandHint(provider: DeployProviderArg, prod: boolean): string {
+	switch (provider) {
+		case 'vercel':
+			return prod ? 'vercel deploy --prebuilt --prod' : 'vercel deploy --prebuilt'
+		case 'netlify':
+			return prod ? 'netlify deploy --prod --dir=build' : 'netlify deploy --dir=build'
+		case 'cloudflare':
+			return 'wrangler deploy'
+		case 'railway':
+			return 'railway up'
+		case 'render':
+			return 'render blueprint apply'
+		case 'docker':
+			return 'docker compose up --build -d'
+	}
+}
+
+async function cmdDeploy(providerArg: string | undefined, flags: Record<string, string | boolean>) {
+	if (!providerArg) {
+		throw new Error(`Missing deploy provider (expected one of: ${VALID_DEPLOY_PROVIDERS.join(', ')})`)
+	}
+	if (!VALID_DEPLOY_PROVIDERS.includes(providerArg as DeployProviderArg)) {
+		throw new Error(`Unsupported deploy provider "${providerArg}" (expected one of: ${VALID_DEPLOY_PROVIDERS.join(', ')})`)
+	}
+	const provider = providerArg as DeployProviderArg
+	const found = await findProjectRoot(process.cwd())
+	if (!found) throw new Error('Not in a Dex project (missing dex.config.*)')
+
+	const { cmd, env } = bunCmd()
+	const script =
+		"import { dexPrepareProvider } from '@dex/dev'; const provider = process.env.DEX_DEPLOY_PROVIDER; if (!provider) throw new Error('Missing DEX_DEPLOY_PROVIDER'); const res = await dexPrepareProvider({ rootDir: process.cwd(), provider: provider as any }); if (res.filesWritten.length > 0) { console.log('Generated deployment files:'); for (const f of res.filesWritten) console.log('  - ' + f); }"
+
+	await run(cmd, ['-e', script], found.root, { ...env, DEX_DEPLOY_PROVIDER: provider })
+
+	const dryRun = Boolean(flags['dry-run'])
+	const prod = Boolean(flags.prod)
+	if (!dryRun && provider === 'vercel') {
+		const vercelBin = (Bun as any).which?.('vercel') as string | undefined
+		if (vercelBin) {
+			const args = ['deploy', '--prebuilt']
+			if (prod) args.push('--prod')
+			await run(vercelBin, args, found.root, env)
+			return
+		}
+	}
+
+	console.log(`\nNext step (${provider}): run \`${deployCommandHint(provider, prod)}\``)
+}
+
 async function cmdBuild() {
 	const found = await findProjectRoot(process.cwd())
 	if (!found) throw new Error('Not in a Dex project (missing dex.config.*)')
@@ -1570,6 +1627,11 @@ async function main() {
 
 		if (cmd === 'build') {
 			await cmdBuild()
+			return
+		}
+
+		if (cmd === 'deploy') {
+			await cmdDeploy(positional[1], flags)
 			return
 		}
 

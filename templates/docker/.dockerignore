@@ -1,0 +1,17 @@
+node_modules
+build
+.vercel
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite*
+*.db
+*.pem
+*.key
+.dex/
+.DS_Store
+coverage
+.cache

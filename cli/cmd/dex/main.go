@@ -29,6 +29,7 @@ Usage:
   dex use <version>
   dex tag <patch|minor|major>
   dex build
+  dex deploy <vercel|netlify|cloudflare|railway|render|docker> [--dry-run] [--prod]
   dex start [-p]
   dex pie generate [spec-url-or-file] [--out <path>] [--prefix <prefix>]
 
@@ -66,6 +67,10 @@ Template options:
 
 Start options:
   -p                         Production mode (NODE_ENV=production)
+
+Deploy options:
+  --dry-run                  Prepare deployment artifacts without invoking provider CLI
+  --prod                     Deploy to production (passed through to provider CLI)
 
 Tag options:
   patch                      Bump SemVer patch (e.g. v0.1.44 -> v0.1.45)
@@ -262,6 +267,24 @@ func run(argv []string) error {
 			return errors.New("Not in a Dex project (missing dex.config.*)")
 		}
 		return runner.CmdBuild(found.Root)
+
+	case "deploy":
+		if len(args.Positional) < 2 || args.Positional[1] == "" {
+			printUsage(os.Stderr)
+			return errors.New("missing deploy provider (expected one of: vercel, netlify, cloudflare, railway, render, docker)")
+		}
+		provider := args.Positional[1]
+		if !runner.IsValidDeployProvider(provider) {
+			return fmt.Errorf("unsupported deploy provider %q (expected one of: vercel, netlify, cloudflare, railway, render, docker)", provider)
+		}
+		found, err := core.FindProjectRoot(cwd)
+		if err != nil {
+			return err
+		}
+		if found == nil {
+			return errors.New("Not in a Dex project (missing dex.config.*)")
+		}
+		return runner.CmdDeploy(found.Root, provider, args.HasFlag("dry-run"), args.HasFlag("prod"))
 
 	case "start", "dev":
 		found, err := core.FindProjectRoot(cwd)

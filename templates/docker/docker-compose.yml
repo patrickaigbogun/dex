@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-7990}:7990"
+    environment:
+      NODE_ENV: production
+      PORT: "7990"
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7990/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  dev:
+    image: oven/bun:1-slim
+    profiles: ["dev"]
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "${PORT:-7990}:7990"
+    environment:
+      NODE_ENV: development
+      PORT: "7990"
+    env_file:
+      - path: .env
+        required: false
+    command: sh -c "bun install --no-progress && bun run dev"
