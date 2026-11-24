@@ -8,7 +8,16 @@ set -euo pipefail
 #   DEX_HOME=~/.dex curl -fsSL .../install.sh | bash
 
 DEX_REPO="${DEX_REPO:-patrickaigbogun/dex}"
+if [[ ! "${DEX_REPO}" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]] || [[ "${DEX_REPO}" == *".."* ]]; then
+  echo "Invalid DEX_REPO: ${DEX_REPO}" >&2
+  exit 1
+fi
+
 DEX_VERSION="${DEX_VERSION:-latest}"
+if [[ "${DEX_VERSION}" == *".."* ]]; then
+  echo "Invalid DEX_VERSION: ${DEX_VERSION}" >&2
+  exit 1
+fi
 DEX_HOME="${DEX_HOME:-${HOME}/.dex}"
 DEX_BIN_DIR="${DEX_HOME}/bin"
 
@@ -51,6 +60,11 @@ if [[ "${DEX_VERSION}" == "latest" ]]; then
   fi
 fi
 
+if [[ ! "${resolved_tag}" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || [[ "${resolved_tag}" == *".."* ]]; then
+  echo "Invalid resolved tag: ${resolved_tag}" >&2
+  exit 1
+fi
+
 if [[ "${resolved_tag}" == "latest" ]]; then
   url="${base}/latest/download/${asset}"
 else
@@ -64,21 +78,23 @@ out="${version_dir}/dex"
 echo "Installing Dex (${asset}) from ${DEX_REPO}@${resolved_tag} -> ${out}" >&2
 
 # prefer curl; fallback to wget
+tmp_out="${out}.tmp.$$"
 if command -v curl >/dev/null 2>&1; then
-  curl -# -fL "${url}" -o "${out}"
+  curl -# -fL "${url}" -o "${tmp_out}"
 elif command -v wget >/dev/null 2>&1; then
-  wget --show-progress -qO "${out}" "${url}"
+  wget --show-progress -qO "${tmp_out}" "${url}"
 else
   echo "Missing downloader: install curl or wget" >&2
   exit 1
 fi
 
-chmod +x "${out}"
+chmod +x "${tmp_out}"
+mv -f "${tmp_out}" "${out}"
 
 # Link ~/.dex/current -> ~/.dex/versions/<version>
 current_link="${DEX_HOME}/current"
-rm -rf "${current_link}"
-ln -s "${version_dir}" "${current_link}"
+rm -f "${current_link}"
+ln -sfn "${version_dir}" "${current_link}"
 
 # Link ~/.dex/bin/dex -> ~/.dex/current/dex
 bin_link="${DEX_BIN_DIR}/dex"

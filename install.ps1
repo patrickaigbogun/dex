@@ -7,7 +7,14 @@
 $ErrorActionPreference = "Stop"
 
 $DEX_REPO = if ($env:DEX_REPO) { $env:DEX_REPO } else { "patrickaigbogun/dex" }
+if ($DEX_REPO -notmatch '^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$' -or $DEX_REPO -like '*..*') {
+  throw "Invalid DEX_REPO: $DEX_REPO"
+}
+
 $DEX_VERSION = if ($env:DEX_VERSION) { $env:DEX_VERSION } else { "latest" }
+if ($DEX_VERSION -like '*..*') {
+  throw "Invalid DEX_VERSION: $DEX_VERSION"
+}
 $DEX_HOME = if ($env:DEX_HOME) { $env:DEX_HOME } else { Join-Path $HOME ".dex" }
 $DEX_BIN_DIR = Join-Path $DEX_HOME "bin"
 
@@ -27,6 +34,10 @@ if ($DEX_VERSION -eq "latest") {
   } catch {}
 }
 
+if ($resolvedTag -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' -or $resolvedTag -like '*..*') {
+  throw "Invalid resolved tag: $resolvedTag"
+}
+
 if ($resolvedTag -eq "latest") {
   $url = "$base/latest/download/$asset"
 } else {
@@ -38,10 +49,12 @@ New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DEX_BIN_DIR | Out-Null
 
 $out = Join-Path $versionDir "dex.exe"
+$outTmp = "$out.tmp"
 
 Write-Host "Installing Dex ($asset) from $DEX_REPO@$resolvedTag -> $out" -ForegroundColor Cyan
 
-Invoke-WebRequest -Uri $url -OutFile $out
+Invoke-WebRequest -Uri $url -OutFile $outTmp
+Move-Item -Force $outTmp $out
 
 # Set current junction
 $currentLink = Join-Path $DEX_HOME "current"

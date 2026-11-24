@@ -11,38 +11,39 @@ permissions:
 jobs:
   build-cli:
     name: Build dex binary (${{ matrix.target }})
-    runs-on: ${{ matrix.runsOn }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux-x64
-            runsOn: ubuntu-latest
+            goos: linux
+            goarch: amd64
             ext: ''
           - target: linux-arm64
-            runsOn: ubuntu-latest
+            goos: linux
+            goarch: arm64
             ext: ''
           - target: darwin-x64
-            runsOn: macos-latest
+            goos: darwin
+            goarch: amd64
             ext: ''
           - target: darwin-arm64
-            runsOn: macos-latest
+            goos: darwin
+            goarch: arm64
             ext: ''
           - target: windows-x64
-            runsOn: windows-latest
+            goos: windows
+            goarch: amd64
             ext: '.exe'
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          bun-version: latest
-
-      - name: Install deps
-        run: bun install
-        working-directory: framework
+          go-version: '1.22'
 
       - name: Build dex binary
         shell: bash
@@ -50,14 +51,19 @@ jobs:
           set -euo pipefail
           mkdir -p ../dist
           TAG_VERSION="${GITHUB_REF#refs/tags/}"
-          bun build --compile ./packages/cli/src/cli.ts --outfile ../dist/dex-${{ matrix.target }}${{ matrix.ext }} --target=bun-${{ matrix.target }} --define DEX_CLI_VERSION="\"${TAG_VERSION}\""
-        working-directory: framework
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w -X main.Version=${TAG_VERSION}" -o ../dist/dex-${{ matrix.target }}${{ matrix.ext }} ./cmd/dex
+        working-directory: cli
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: dex-${{ matrix.target }}${{ matrix.ext }}
           path: dist/dex-${{ matrix.target }}${{ matrix.ext }}
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          (cd out && sha256sum * > SHA256SUMS)
 
   build-templates:
     name: Build template tarballs
@@ -98,99 +104,3 @@ jobs:
         with:
           name: dex-diff
           path: dist/dex-diff-*.json
-
-  build-types:
-    name: Build types
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install deps
-        run: bun install
-        working-directory: framework
-
-      - name: Build types
-        run: bun run build:types
-        working-directory: framework
-
-  build-packages:
-    name: Build package tarballs
-    runs-on: ubuntu-latest
-    needs: [build-types]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install deps
-        run: bun install
-        working-directory: framework
-
-      - name: Create package tgz
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ../dist
-          for pkg in router server dev pie; do
-            tar -czf "../dist/dex-package-${pkg}.tgz" -C packages "${pkg}"
-          done
-        working-directory: framework
-
-      - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dex-packages
-          path: dist/dex-package-*.tgz
-
-  publish-release:
-    name: Publish GitHub Release Assets
-    needs: [build-cli, build-templates, build-packages]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Flatten artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          # binaries
-          for d in dist/dex-*; do
-            if [[ -d "$d" ]]; then
-              f=$(find "$d" -maxdepth 1 -type f | head -n1 || true)
-              if [[ -n "${f}" ]]; then
-                cp "$f" "out/$(basename "$f")"
-              fi
-            fi
-          done
-          # templates
-          if [[ -d dist/dex-templates ]]; then
-            cp dist/dex-templates/*.tgz out/
-          fi
-          # packages
-          if [[ -d dist/dex-packages ]]; then
-            cp dist/dex-packages/*.tgz out/
-          fi
-          # diffs
-          if [[ -d dist/dex-diff ]]; then
-            cp dist/dex-diff/*.json out/
-          fi
-
-      - name: Upload assets to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            out/*
