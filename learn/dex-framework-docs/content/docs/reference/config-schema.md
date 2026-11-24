@@ -4,46 +4,66 @@ title: "Config Schema"
 
 # Config Schema
 
-Reference for `dex.config.ts`.
+Reference for `dex.config.ts` (`DexConfig` schema).
 
-## Basic Config
+## Complete `DexConfig` Example
 
 ```ts
 import type { DexConfig } from '@dex/router'
 
 export default {
-  // Router generation paths
+  mode: 'spa',
+  port: 7990,
+  renderStrategy: 'spa',
   pagesDir: 'web/pages',
   layoutsDir: 'web/layouts',
   outRoutesTs: 'core/router/.generated/routes.ts',
   outRoutesJson: 'core/router/.generated/manifest.json',
   outLayoutsTs: 'core/router/.generated/layouts.ts',
-
-  // Runtime and server settings
-  mode: 'spa',
-  port: 7990,
-  renderStrategy: 'spa',
-
-  // Watch configuration
+  subdomains: {
+    admin: '/admin',
+    api: '/api',
+  },
+  fonts: {
+    sans: {
+      family: 'Inter',
+      variable: '--font-sans',
+      weights: '100..900',
+      display: 'swap',
+      provider: 'google',
+    },
+  },
+  apiSpec: 'https://api.example.com/openapi.json',
+  apiUrl: 'https://api.example.com',
+  outApiTs: 'core/api/generated.ts',
+  apiPrefix: '/api',
   watchFiles: [],
   watchDirs: [],
+  packageVersions: {},
 } satisfies DexConfig
 ```
 
-## Options
+## Options Reference
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `pagesDir` | `string` | `'web/pages'` | Directory containing route page components (`.tsx`) |
-| `layoutsDir` | `string` | `'web/layouts'` | Directory containing layout components (`.tsx`, `.ts`) |
-| `outRoutesTs` | `string` | `'core/router/.generated/routes.ts'` | Output file path for generated route definitions TypeScript |
-| `outRoutesJson` | `string` | `'core/router/.generated/manifest.json'` | Output file path for generated route manifest JSON |
-| `outLayoutsTs` | `string` | `'core/router/.generated/layouts.ts'` | Output file path for generated layout loader map TypeScript |
-| `mode` | `string` | `'spa'` | Application mode (`'spa'` or `'mpa'`) |
-| `port` | `number` | `7990` | Server and dev port |
-| `renderStrategy` | `string` | `'spa'` | Page rendering strategy (`'spa'`, `'ssg'`, `'ssr'`, `'ppr'`, `'dynamic'`) |
-| `watchFiles` | `string[]` | `[]` | Additional file paths to watch |
-| `watchDirs` | `string[]` | `[]` | Additional directory paths to watch |
+| `mode` | `'spa' \| 'mpa'` | `'spa'` | Application mode |
+| `port` | `number` | `7990` | Default server port |
+| `renderStrategy` | `'spa' \| 'ssg' \| 'ssr' \| 'ppr' \| 'dynamic'` | `'spa'` | Default page rendering strategy |
+| `pagesDir` | `string` | `'web/pages'` | Directory containing route page components |
+| `layoutsDir` | `string` | `'web/layouts'` | Directory containing layout components |
+| `outRoutesTs` | `string` | `'core/router/.generated/routes.ts'` | Output path for generated routes TypeScript |
+| `outRoutesJson` | `string` | `'core/router/.generated/manifest.json'` | Output path for generated route manifest JSON |
+| `outLayoutsTs` | `string` | `'core/router/.generated/layouts.ts'` | Output path for generated layouts map TypeScript |
+| `subdomains` | `Record<string, string>` | `{}` | Subdomain routing prefix mapping |
+| `fonts` | `DexFontsConfig` | `{}` | Google Fonts configuration spec |
+| `apiSpec` | `string` | `undefined` | OpenAPI spec path or URL for `dex pie generate` |
+| `apiUrl` | `string` | `undefined` | Default API base URL for client initialization |
+| `outApiTs` | `string` | `'core/api/generated.ts'` | Output path for generated API client |
+| `apiPrefix` | `string` | `'/api'` | API prefix to strip from route tree |
+| `watchFiles` | `string[]` | `[]` | Additional files to watch |
+| `watchDirs` | `string[]` | `[]` | Additional directories to watch |
+| `packageVersions` | `Record<string, string>` | `{}` | Pin framework package versions |
 
 ## Config File Resolution
 

@@ -1,14 +1,14 @@
 # Dex Framework Roadmap
 
 ## Overview
-Dex is evolving toward a truly modular, composable Bun-first framework. This roadmap outlines planned improvements across CLI architecture, core modularity, testing, deployment, and performance.
+Dex is evolving toward a modular, composable Bun-first framework powered by a native Go CLI. This roadmap tracks completed milestones and planned improvements across CLI architecture, core modularity, testing, deployment, and performance.
 
 ---
 
 ## Phase 1: Core Modularity & Testing
 
 ### CLI Modularization
-- [ ] Refactor `framework/packages/cli` into independent, composable modules
+- [ ] Refactor `framework/packages/cli` into independent, composable TypeScript modules (for external JS integration alongside the native Go CLI)
   - `cli/core` — command registry, argument parsing
   - `cli/router` — route generation commands
   - `cli/build` — build pipeline orchestration
@@ -17,7 +17,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 - [ ] Add plugin/hook system for third-party CLI extensions
 
 ### Package System Design (Plugin Architecture)
-- [ ] Formalize "packages" terminology; rename/clarify internal package boundaries
+- [ ] Formalize "packages" terminology; clarify internal package boundaries
 - [ ] Design plugin interface for:
   - Custom route generators
   - Build-time transformations
@@ -27,11 +27,12 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 - [ ] Support manual assembly via workspace resolution (current approach) + future auto-discovery
 
 ### Testing Infrastructure
-- [ ] Add unit test suite for `@dex/router` (route matching, segment parsing, metadata resolution)
-- [ ] Add integration tests for `@dex/server` (SPA fallback, assets, dev reload)
-- [ ] Add CLI tests (command parsing, file generation, error handling)
-- [ ] Set up CI/CD with test coverage reporting
-- [ ] Target: >80% coverage on core packages
+- [x] Add unit test suite for `@dex/router` (route matching, segment parsing, precedence sorting, client router, `composeRoutes`, route/layout generation)
+- [x] Add integration tests for `@dex/server` (SPA fallback, assets path safety, dev reload, env/port utilities)
+- [x] Add tests for `@dex/pie` and `@dex/cli`
+- [x] Add Go CLI tests across `cli/cmd/dex` and `cli/internal/{core,pie,runner,scaffold,version}`
+- [x] Set up CI/CD with test execution (`bun test`, `bun run typecheck`, `go vet ./...`, `go test ./...`)
+- [ ] Add coverage reporting and enforce >80% coverage on core packages
 
 ---
 
@@ -78,7 +79,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 ### Docker Support
 - [ ] Publish official Dockerfile for Dex apps
 - [ ] Add `docker-compose.yml` template for dev + prod
-- [ ] Provide multi-stage build example (dev → prod)
+- [ ] Provide multi-stage build example (dev to prod)
 - [ ] Document container best practices (layer caching, env injection)
 - [ ] Include Docker template in `templates/docker`
 
@@ -95,7 +96,7 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 
 ### Performance Optimization
 - [ ] Optimize router segment parsing for large route sets
-- [ ] Reduce CLI startup time (lazy-load plugins, tree-shake unused code)
+- [x] Reduce CLI startup time via native Go binary (<5ms startup)
 - [ ] Profile and reduce memory footprint of file watcher
 - [ ] Consider persistent route cache to avoid regeneration on every watch trigger
 
@@ -104,38 +105,35 @@ Dex is evolving toward a truly modular, composable Bun-first framework. This roa
 ## Phase 5: CLI Port to Go
 
 ### Go CLI Implementation
-- [ ] Prototype Go-based CLI (`dex-cli-go`)
-  - Faster startup time (no VM overhead)
-  - Single binary distribution
-  - Better cross-platform support
-- [ ] Maintain feature parity with Bun/TypeScript CLI
-- [ ] Provide migration path for existing users
-- [ ] Keep TypeScript CLI as fallback for extensibility
-- [ ] Decide: replace or coexist with Bun CLI based on adoption
+- [x] Build Go-based CLI (`cli/`)
+  - Sub-5ms startup time (no VM overhead)
+  - Single binary distribution (<8 MB)
+  - Cross-platform builds (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `windows-x64.exe`)
+- [x] Maintain feature parity with Bun/TypeScript CLI (`scaffold`, `sync`, `template`, `pie generate`, `update`, `versions`, `use`, `build`, `start`, `tag`)
+- [x] Provide seamless installation and version management (`install.sh`, `install.ps1`, `~/.dex/`)
+- [x] Keep TypeScript CLI (`framework/packages/cli`) as fallback/package reference
 
 ---
 
 ## Ongoing
 
 ### Code Quality
-- [ ] Maintain changelog entries for all package changes
+- [x] Maintain `CHANGELOG.md` entries for package and CLI releases
 - [ ] Keep roadmap synchronized with GitHub milestones
 - [ ] Review and close stale issues monthly
 - [ ] Gather user feedback on plugin/package system
 
 ### Documentation
 - [ ] Expand plugin authoring guide
-- [ ] Add framework architecture overview
+- [x] Maintain Fumadocs documentation site (`learn/dex-framework-docs/`) covering CLI, Router, Server, Pie, Dev, and Core Concepts
 - [ ] Document performance baselines and regression prevention
 - [ ] Create video tutorials for key workflows
 
 ---
 
 ## Success Criteria
-- ✅ Framework is truly modular — packages can be composed independently
-- ✅ Plugin system is documented and has 3+ community plugins
-- ✅ Test coverage >80% on core packages
-- ✅ CLI startup time <500ms on typical hardware
-- ✅ Deployment guides cover 5+ providers
-- ✅ Docker experience is frictionless
-- ✅ Performance baselines are published and tracked
+- Framework is modular — `@dex/router`, `@dex/server`, `@dex/dev`, `@dex/pie`, and `@dex/cli` compose independently
+- Native Go CLI delivers <5ms startup and single-binary cross-platform distribution
+- Core packages and Go CLI have automated unit/integration test suites running in CI
+- Plugin system documented with community plugins (in progress)
+- Deployment guides and Docker workflow streamlined across major platforms (in progress)

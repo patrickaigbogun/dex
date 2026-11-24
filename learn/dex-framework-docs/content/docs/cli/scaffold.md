@@ -16,20 +16,21 @@ dex scaffold <dir> [options]
 
 When you run `dex scaffold <dir>`:
 
-1. **Prepares Destination Directory**: Creates the target folder `<dir>` and verifies it is empty.
-2. **Project Type Prompt**: Interactively asks you to choose a project mode:
-   - `spa` — Single-Page Application mode (fetches `dex-template-spa.tgz`)
-   - `mpa` — Multi-Page Application mode (fetches `dex-template-mpa.tgz`)
-3. **Downloads & Extracts Template**: Resolves the template archive from GitHub Releases (or custom URL / local file) and extracts project boilerplate files.
-4. **Fetches Framework Packages**: Downloads bundled framework package tarballs (`router`, `server`, `dev`, and `pie`), extracts them into the local `packages/` directory, and sets up `packages/index.ts`.
-5. **Initializes Metadata**: Creates `.dex/metadata.json` to track the template version and release tag for future updates and syncs.
-6. **Verifies Project Structure**: Checks that required files (`package.json`, `dex.config.*`, `packages/`) are present.
-7. **Installs Dependencies**: Automatically runs `bun install` inside the project directory (unless `--no-install` is specified).
+1. **Prepares Destination Directory**: Creates `<dir>` and verifies it is empty.
+2. **Project Type Selection**: Uses `--mode <spa|mpa>` or interactively prompts you to choose:
+   - `spa` — Single-Page Application template (`dex-template-spa.tgz`)
+   - `mpa` — Multi-Page Application template (`dex-template-mpa.tgz`)
+3. **Resolves & Caches Template**: Downloads the template archive from GitHub Releases (using the local OS template cache unless `--no-cache` or `--fresh` is passed), a direct `--template-url`, or a local `--template` `.tgz` file. Archive extraction enforces path-traversal checks (`SafeJoin`), rejects symlinks/hardlinks, and enforces entry and size limits.
+4. **Fetches Framework Packages**: Downloads bundled framework package tarballs (`router`, `server`, `dev`, `pie`), extracts them into `packages/`, creates `packages/index.ts`, and records `dex.packageVersions` in `package.json`.
+5. **Initializes Metadata**: Creates `.dex/metadata.json` to track the template version and release tag for future `dex sync` updates.
+6. **Verifies Project Structure**: Checks that `package.json`, `dex.config.*`, and `packages/*` are present.
+7. **Installs Dependencies**: Runs `bun install` inside `<dir>` (unless `--no-install` is passed).
 
 ## Options
 
 | Option | Description | Default |
-|--------|-------------|---------|
+|---|---|---|
+| `--mode <spa\|mpa>` | Skip interactive prompt and select project type | Interactive prompt |
 | `--repo <owner/repo>` | GitHub repository containing template release assets | `patrickaigbogun/dex` |
 | `--tag <tag\|latest>` | Release tag to download template from | `latest` |
 | `--packages-repo <owner/repo>` | GitHub repository containing `dex-package-*.tgz` assets | Template repository |
@@ -37,6 +38,7 @@ When you run `dex scaffold <dir>`:
 | `--template <path>` | Path to a local `.tgz` archive (skips GitHub API) | — |
 | `--template-url <url>` | Direct URL to download template `.tgz` (skips GitHub API) | — |
 | `--no-install` | Skip running `bun install` during scaffolding | `false` |
+| `--no-cache`, `--fresh` | Bypass the local template cache and download fresh release assets | `false` |
 
 ## Examples
 
@@ -51,11 +53,20 @@ cd my-blog
 dex start
 ```
 
-### Specify Release Tag or Custom Repository
+### Bypass Local Cache (`--no-cache` / `--fresh`)
 
 ```bash
-# Pin to a specific release tag
-dex scaffold my-blog --tag v0.1.44
+# Force fresh downloads from GitHub Releases instead of cached tarballs
+dex scaffold my-blog --fresh
+# or
+dex scaffold my-blog --no-cache
+```
+
+### Specify Release Tag, Mode, or Custom Repository
+
+```bash
+# Pin to a specific release tag non-interactively
+dex scaffold my-blog --mode spa --tag v0.2.6
 
 # Use templates from a custom repository
 dex scaffold my-blog --repo myorg/dex-templates --tag v1.0.0
@@ -86,20 +97,20 @@ my-blog/
 ├─ dex.config.ts          # Dex framework configuration
 ├─ package.json           # Dependencies and scripts
 ├─ tsconfig.json          # TypeScript configuration
+├─ core/
+│  ├─ bootstrap/          # dev.ts, build.ts, web.tsx
+│  └─ runtime/            # Dev and prod Elysia server entrypoints
 ├─ packages/              # Bundled Dex framework modules
 │  ├─ router/             # File-based router package
 │  ├─ server/             # Server runtime package
 │  ├─ dev/                # Dev server and build tool package
-│  ├─ pie/                # UI and page helper package
+│  ├─ pie/                # Typed API client package
 │  └─ index.ts            # Package re-exports
 ├─ web/
 │  ├─ pages/              # File-based route components
-│  │  ├─ index.tsx
-│  │  └─ about.tsx
 │  ├─ layouts/            # Layout components
-│  │  └─ global.tsx
-│  └─ public/             # Static assets (images, fonts, etc.)
-└─ routes/                # API and endpoint routes
+│  └─ public/             # Static assets and index.html
+└─ routes/                # Backend API routes
 ```
 
 ## Next Steps

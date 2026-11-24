@@ -4,20 +4,15 @@ title: "Server"
 
 # `@dex/server` (Agent)
 
-## Exports
+## Exports & Features
 
-- `dexAssetsRoute({ assetsDir, cacheControlProd?, cacheControlDev? })`
-- `dexSpaFallback({ indexHtmlPath })`
-- `dexDevReloadRouter({ watchFiles?, watchDirs?, pollIntervalMs? })`
-- `dexPrettyLogger({ ignore?, includeQuery? })`
+- `dexAssetsRoute`
+- `dexSpaFallback` (with subdomain mounting, security-hardened APIs, Google Fonts injection, and head meta resolution)
+- `dexDevReloadRouter`
+- `dexPrettyLogger`
+- Google Fonts (`fonts.ts`) & Subdomain mounting
 
-## Key behavior
+## See Also
 
-- `dexSpaFallback` skips `/api/*`, `/assets/*`, `/__dev/*`, and paths containing `.`.
-- `dexPrettyLogger` is a function-plugin (attaches hooks to parent app) and logs on `onAfterResponse`.
-
-## Starter prod server
-
-- Entry: `templates/starter/core/runtime/server/prod.ts`
-- Build: `bun build --compile core/runtime/server/prod.ts --outfile build/server`
-- API-only: `DEX_API_ONLY=1`
+- Server Guide: [`../server/`](../server/)
+- Router Guide: [`../router/`](../router/)

@@ -4,18 +4,19 @@ title: "Dev"
 
 # `@dex/dev` (Agent)
 
-## Export
+## Core Bootstraps & Exports
 
+- `core/bootstrap/dev.ts`
+- `core/bootstrap/build.ts`
 - `spawnGroup([{ name, cmd }])`
+- `dexDev`, `dexBuild`, `dexBuildClient`, `dexPrepareBuild`, `dexPrerender`
 
 ## Behavior
 
-- Spawns each command via `Bun.spawn()`.
-- If any process exits non-zero, terminates the whole group.
-- Handles `SIGINT`/`SIGTERM` by shutting down the group.
-- Prefixes each task’s stdout/stderr lines with `[name]` (colorized when TTY).
-- Set `DEX_DEV_RAW=1` to disable prefixing and inherit raw stdio.
+- Spawns tasks via `Bun.spawn()`.
+- Prefixes stdout/stderr with `[name]`.
 
-## Starter usage
+## See Also
 
-- `templates/starter/core/bootstrap/dev.ts`
+- Dev Guide: [`../dev/`](../dev/)
+- Server Guide: [`../server/`](../server/)

@@ -4,15 +4,16 @@ title: "Commands"
 
 # CLI Commands
 
-The Dex CLI (`dex`) provides commands for scaffolding projects, syncing upstream updates, managing release tags, building, and running applications.
+The native Go Dex CLI (`dex`) provides sub-5ms commands for scaffolding projects, managing template caches, syncing upstream updates, generating OpenAPI clients, tagging releases, and building/running applications.
 
 ## Overview
 
 ```bash
 dex scaffold <dir> [options]
 dex sync [--interactive] [options]
+dex template <list|cache|diff> [options]
 dex update [version] [--force]
-dex versions | dex list
+dex versions | dex list | dex ls
 dex use <version>
 dex pie generate [spec-url-or-file] [options]
 dex tag <patch|minor|major>
@@ -25,18 +26,19 @@ dex -v / --version [-f]
 
 ## `dex scaffold`
 
-Scaffold a new Dex project in the specified directory.
+Scaffold a new Dex project in `<dir>`.
 
 ```bash
 dex scaffold <dir> [options]
 ```
 
-When run, `dex scaffold` prompts you to choose the project type (`spa` or `mpa`), downloads and extracts the template archive and framework package archives (`router`, `server`, `dev`, `pie`) into the `packages/` directory, initializes `.dex/metadata.json`, and runs `bun install` by default.
+Prompts for project mode (`spa` or `mpa`, or pass `--mode`), downloads and extracts the template archive and framework packages (`router`, `server`, `dev`, `pie`) into `packages/`, initializes `.dex/metadata.json`, and runs `bun install` unless `--no-install` is set.
 
 ### Options
 
 | Option | Description |
-|--------|-------------|
+|---|---|
+| `--mode <spa\|mpa>` | Project template mode (`spa` or `mpa`) without prompting |
 | `--repo <owner/repo>` | GitHub repository containing release templates (default: `patrickaigbogun/dex`) |
 | `--tag <tag\|latest>` | Release tag to download template from (default: `latest`) |
 | `--packages-repo <owner/repo>` | GitHub repository containing `dex-package-*.tgz` assets |
@@ -44,6 +46,7 @@ When run, `dex scaffold` prompts you to choose the project type (`spa` or `mpa`)
 | `--template <path>` | Use a local template `.tgz` archive instead of downloading from GitHub |
 | `--template-url <url>` | Download template `.tgz` archive from a direct URL (skips GitHub API) |
 | `--no-install` | Do not run `bun install` after scaffolding |
+| `--no-cache`, `--fresh` | Bypass the local template cache and download fresh tarballs |
 
 ### Examples
 
@@ -51,50 +54,89 @@ When run, `dex scaffold` prompts you to choose the project type (`spa` or `mpa`)
 # Scaffold in a new directory
 dex scaffold my-app
 
-# Scaffold using a specific release tag
-dex scaffold my-app --tag v0.1.44
-
-# Scaffold from a custom GitHub repository
-dex scaffold my-app --repo myorg/dex-templates --tag v1.0.0
+# Bypass local template cache and pin a tag
+dex scaffold my-app --tag v0.2.6 --fresh
 
 # Scaffold from a local archive without installing dependencies
-dex scaffold my-app --template ./custom-template.tgz --no-install
-
-# Scaffold from a direct URL
-dex scaffold my-app --template-url https://example.com/templates/dex-template-spa.tgz
+dex scaffold my-app --mode spa --template ./custom-template.tgz --no-install
 ```
 
 ---
 
 ## `dex sync`
 
-Sync upstream template changes and updates into an existing Dex project.
+Sync upstream template changes and obsolete file removals into an existing Dex project.
 
 ```bash
 dex sync [options]
 ```
 
-`dex sync` reads template metadata from `.dex/metadata.json`, fetches the diff manifest (`dex-diff-<tag>.json`) from the release, downloads the template archive, and copies changed files into your project root while preserving project metadata.
+`dex sync` reads `.dex/metadata.json`, fetches the release diff manifest (`dex-diff-<tag>.json`), downloads the template archive (honoring `--no-cache` / `--fresh`), and performs two safety-checked steps:
+
+1. **Enforced SHA-256 checksum verification**: Before copying any file listed in `changedFiles`, `dex sync` computes its SHA-256 digest and verifies it against `diff.Checksums[file]`. If a checksum does not match, the sync aborts with an error.
+2. **Interactive `deletedFiles` cleanup**: If the release diff includes `deletedFiles` that still exist in your project, `dex sync` prompts whether to remove those obsolete upstream files (or removes them automatically when `--force` is passed).
 
 ### Options
 
 | Option | Description |
-|--------|-------------|
-| `--interactive` | Interactively select which files to sync from the release diff |
-| `--repo <owner/repo>` | Template GitHub repository (default: read from `.dex/metadata.json` or `DEX_TEMPLATE_REPO`) |
-| `--tag <tag>` | Release tag to sync with (default: `releaseTag` from metadata or latest release) |
+|---|---|
+| `--interactive` | Interactively select which changed files to sync |
+| `--repo <owner/repo>` | Template GitHub repository (default: `patrickaigbogun/dex` or `DEX_TEMPLATE_REPO`) |
+| `--tag <tag>` | Release tag to sync to (default: `latest`) |
+| `--force` | Force sync even if already on the target version, and remove obsolete `deletedFiles` without prompting |
+| `--no-cache`, `--fresh` | Bypass the local template cache when fetching the template archive |
 
 ### Examples
 
 ```bash
-# Automatically sync all changed files from the current/latest release
+# Sync all changed files from the latest release
 dex sync
 
-# Interactively choose which changed files to apply
-dex sync --interactive
+# Interactively choose which changed files to apply, bypassing cache
+dex sync --interactive --fresh
 
-# Sync against a specific release tag and repository
-dex sync --repo myorg/dex --tag v0.2.0
+# Sync against a specific release tag and force cleanup
+dex sync --tag v0.2.6 --force
+```
+
+---
+
+## `dex template`
+
+Inspect available/cached templates, manage the local template cache, and inspect upstream release diffs.
+
+```bash
+dex template list | ls
+dex template cache list | ls
+dex template cache clean [--all | <tag>]
+dex template diff [tag] [--repo <owner/repo>]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `dex template list` / `ls` | Lists official templates (`spa`, `mpa`) and all locally cached `<owner>/<repo>@<tag>` directories. |
+| `dex template cache list` / `ls` | Lists cached template `.tgz` asset paths and file sizes (in KB) inside the template cache directory. |
+| `dex template cache clean [--all \| <tag>]` | Removes all cached template tarballs (default or `--all`), or deletes cached assets for a specific `<tag>` across repos. |
+| `dex template diff [tag]` | Fetches `dex-diff-<tag>.json` (default: `latest`) and prints JSON with `version`, `previousVersion`, `changedFiles`, and `deletedFiles`. |
+
+### Examples
+
+```bash
+# List official and cached templates
+dex template ls
+
+# Inspect cached tarballs and sizes
+dex template cache list
+
+# Clear cached tarballs for a specific tag, or clear everything
+dex template cache clean v0.2.5
+dex template cache clean --all
+
+# Preview changed and deleted files in the latest release
+dex template diff
+dex template diff v0.2.6
 ```
 
 ---
@@ -107,32 +149,29 @@ Update the Dex CLI to the latest release (or a specific version) with multi-vers
 dex update [version] [options]
 ```
 
-`dex update` checks GitHub Releases for newer versions, downloads the pre-compiled binary for your OS and architecture into `~/.dex/versions/<version>/dex`, displays live download progress, and atomically updates the active symlink (`~/.dex/current` and `~/.dex/bin/dex`).
+Checks GitHub Releases, downloads the native binary for your OS and architecture (`dex-linux-x64`, `dex-linux-arm64`, `dex-darwin-x64`, `dex-darwin-arm64`, or `dex-windows-x64.exe`) into `~/.dex/versions/<version>/`, and atomically updates `~/.dex/current` and `~/.dex/bin/dex`.
 
 ### Options
 
 | Option | Description |
-|--------|-------------|
-| `[version]` | Specific version tag to install (e.g. `v0.2.0`). Defaults to latest GitHub release. |
+|---|---|
+| `[version]` | Specific version tag to install (e.g. `v0.2.6`). Defaults to latest GitHub release. |
 | `--force` | Force re-download even if already on the target version. |
 | `--repo <owner/repo>` | Release repository (default: `patrickaigbogun/dex` or `DEX_TEMPLATE_REPO`). |
 
-### Examples
+### Verifying Release Checksums (`SHA256SUMS`)
+
+Every release publishes a `SHA256SUMS` file covering all cross-compiled CLI binaries:
 
 ```bash
-# Update to latest stable release
-dex update
-
-# Install and switch to a specific version
-dex update v0.2.0
-
-# Force re-downloading current version
-dex update --force
+curl -fsSLO https://github.com/patrickaigbogun/dex/releases/download/v0.2.6/SHA256SUMS
+curl -fsSLO https://github.com/patrickaigbogun/dex/releases/download/v0.2.6/dex-linux-x64
+sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ---
 
-## `dex versions` / `dex list`
+## `dex versions` / `dex list` / `dex ls`
 
 List all locally installed Dex CLI versions stored in `~/.dex/versions/`.
 
@@ -144,110 +183,78 @@ dex list
 dex ls
 ```
 
-Displays installed versions and marks the currently active version with `* (active)`.
-
-### Examples
-
-```bash
-dex versions
-```
-
 Output:
+
 ```
 Dex installed versions (~/.dex):
 
-  * v0.2.0 (active)
-    v0.1.44
+  * v0.2.6 (active)
+    v0.2.5
 ```
 
 ---
 
 ## `dex use`
 
-Switch the active CLI version to another already-installed version.
+Switch the active CLI version to another installed version.
 
 ```bash
 dex use <version>
 ```
 
-Atomically points `~/.dex/current` to `~/.dex/versions/<version>/` and updates `~/.dex/bin/dex`.
-
-### Examples
-
 ```bash
-dex use v0.1.44
-# Now using Dex v0.1.44 ✓
+dex use v0.2.5
+# Now using Dex v0.2.5 ✓
 
-dex use v0.2.0
-# Now using Dex v0.2.0 ✓
+dex use v0.2.6
+# Now using Dex v0.2.6 ✓
 ```
 
 ---
 
 ## `dex pie generate`
 
-Generate a fully typed route-tree API client from an OpenAPI specification.
+Generate a fully typed route-tree API client from a JSON or YAML OpenAPI 3.0/3.1 specification using the Go CLI's built-in YAML/JSON parser (alias: `dex api generate`).
 
 ```bash
 dex pie generate [spec-url-or-file] [options]
 ```
 
-Generates a typed route tree into `core/api/generated.ts` (or custom path) that maps HTTP methods and paths into nested method calls with full parameter and response typing.
-
 ### Options
 
 | Option | Description |
-|--------|-------------|
-| `[spec-url-or-file]` | Path to a local OpenAPI JSON/YAML file, or a URL to a remote schema. |
+|---|---|
+| `[spec-url-or-file]` | Path to a local OpenAPI JSON/YAML file, or a URL to a remote schema (also `--spec`). |
 | `--out <path>` | Output TypeScript file path (default: `core/api/generated.ts`). |
 | `--prefix <prefix>` | Route path prefix to strip from generated client tree (default: `/api`). |
-| `--url <baseUrl>` | Default base API URL (default: inferred from `dex.config.ts` `apiUrl` or `PUBLIC_API_URL`). |
+| `--url <baseUrl>` | Default base API URL (inferred from `dex.config.ts` `apiUrl`, `PUBLIC_API_URL`, or `NEXT_PUBLIC_API_URL`). |
 
 ### Examples
 
 ```bash
-# Generate from local OpenAPI file
+# Generate from local OpenAPI YAML or JSON file
+dex pie generate ./openapi.yaml
 dex pie generate ./openapi.json
 
-# Generate from remote URL
-dex pie generate https://api.example.com/openapi.json
-
-# Custom output path and prefix
-dex pie generate ./openapi.json --out core/api/client.ts --prefix /v1
+# Generate from remote URL with custom output and prefix
+dex pie generate https://api.example.com/openapi.yaml --out core/api/client.ts --prefix /v1
 ```
 
 ---
 
 ## `dex tag`
 
-Bump SemVer version tags and push the tag to the git remote.
+Bump SemVer version tags and push the tag to the `origin` git remote.
 
 ```bash
 dex tag <patch|minor|major>
 ```
 
-Inspects existing git tags matching `v*`, determines the current highest SemVer version, computes the incremented version, creates the git tag, and pushes it to `origin`.
-
-### Arguments
-
 | Argument | Description | Example |
-|----------|-------------|---------|
-| `patch` | Bump SemVer patch version | `v0.1.44` → `v0.1.45` |
-| `minor` | Bump SemVer minor version | `v0.1.44` → `v0.2.0` |
-| `major` | Bump SemVer major version | `v0.1.44` → `v1.0.0` |
-
-### Examples
-
-```bash
-# Create and push a patch release tag
-dex tag patch
-
-# Create and push a minor release tag
-dex tag minor
-
-# Create and push a major release tag
-dex tag major
-```
+|---|---|---|
+| `patch` | Bump SemVer patch version | `v0.2.5` → `v0.2.6` |
+| `minor` | Bump SemVer minor version | `v0.2.6` → `v0.3.0` |
+| `major` | Bump SemVer major version | `v0.2.6` → `v1.0.0` |
 
 ---
 
@@ -259,77 +266,53 @@ Build the Dex application for production.
 dex build
 ```
 
-Discovers the project root (by looking for `dex.config.*`, `config/dex.config.*`, or `package.json` with a `dex` property) and runs `bun run build`.
+Discovers the project root (`dex.config.*`, `config/dex.config.*`, or `package.json#dex`) and runs `bun core/bootstrap/build.ts` (falling back to `core/bootstrap/scripts.ts` or `bun run build`).
 
 ---
 
 ## `dex start`
 
-Start the Dex application in development or production mode.
+Start the Dex application in development or production mode (alias: `dex dev`).
 
 ```bash
 dex start [-p]
 ```
 
-Discovers the project root, reads configuration from `dex.config.*` (or `package.json`), resolves the configured `port`, and starts the server.
-
-### Options
-
 | Option | Description |
-|--------|-------------|
-| `-p` | Production mode. Sets `NODE_ENV=production` and runs `bun run start`. Without `-p`, runs in development mode (`bun run dev`). |
-
-### Examples
-
-```bash
-# Start development server
-dex start
-
-# Start production server
-dex start -p
-```
+|---|---|
+| `-p` | Production mode (`NODE_ENV=production`). Executes `./build/server` (`./build/server.exe` on Windows) if present, falling back to `bun run start`. Without `-p`, runs `bun core/bootstrap/dev.ts`. |
 
 ---
 
 ## Version Flags
-
-Check the version of the Dex CLI and scaffolded project template.
 
 ```bash
 # Show CLI version
 dex -v
 dex --version
 
-# Show CLI version and framework template version
+# Show CLI version and framework template version from .dex/metadata.json
 dex --version -f
 dex -v -f
 ```
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `-v`, `--version` | Display the `@dex/cli` version (e.g. `dex 0.1.0`) |
-| `-f` | Used with `--version` to also display the template version from `.dex/metadata.json` (e.g. `template: v0.1.44`) |
 
 ---
 
 ## Environment Variables
 
-The Dex CLI supports the following environment variables:
-
 | Variable | Description | Default |
-|----------|-------------|---------|
+|---|---|---|
 | `DEX_HOME` | Custom installation and multi-version storage directory | `~/.dex` |
 | `DEX_TEMPLATE_REPO` | Default GitHub template repository (`owner/repo`) | `patrickaigbogun/dex` |
 | `DEX_TEMPLATE_TGZ` | Path to local template `.tgz` archive (skips GitHub API) | — |
 | `DEX_TEMPLATE_URL` | Direct URL to template `.tgz` archive (skips GitHub API) | — |
 | `DEX_PACKAGE_REPO` | GitHub repository (`owner/repo`) for `dex-package-*.tgz` assets | Template repo |
 | `DEX_PACKAGE_TAG` | Release tag for `dex-package-*.tgz` assets | Template tag |
-| `DEX_CACHE_DIR` | Directory for caching downloaded templates and packages | OS cache directory |
+| `DEX_CACHE_DIR` | Directory for caching downloaded templates and packages | OS cache directory (`~/.cache/dex`, `~/Library/Caches/dex`, or `%LOCALAPPDATA%\dex\Cache`) |
 | `DEX_TEMPLATE_CACHE_TTL_MS` | Cache TTL in milliseconds for `latest` release downloads | `1800000` (30m) |
 | `DEX_FETCH_TIMEOUT_MS` | Network timeout in milliseconds for GitHub API requests | `30000` (30s) |
-| `GITHUB_TOKEN` | GitHub Personal Access Token to avoid rate limits or access private repositories | — |
+| `DEX_API_SPEC` | Default OpenAPI spec URL or path for `dex pie generate` | — |
+| `GITHUB_TOKEN` | GitHub token to avoid rate limits or access private repositories | — |
 
 ---
 

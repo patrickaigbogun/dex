@@ -14,9 +14,20 @@ Error: Port 7990 is already in use
 
 **Solution:**
 ```bash
-# Use a different port
-PORT=7991 bun run dev
+PORT=7991 dex start
 ```
+
+## `<Link>` Prop Validation Errors
+
+```
+Error: Invalid prop supplied to <Link>
+```
+
+**Solution:** Ensure `<Link>` components receive valid string `to` props and children, matching router route definitions.
+
+## Router Error Boundary
+
+If a runtime route error occurs, Dex wraps execution in `RouterErrorBoundary`, catching rendering errors and displaying fallback error states.
 
 ## Routes Not Generated
 
@@ -26,27 +37,18 @@ Error: No pages found
 
 **Solution:**
 - Ensure pages are in `web/pages/`
-- Check file extensions (`.tsx`, `.ts`)
-- Restart the dev server
-
-## Layout Not Showing
-
-**Problem:** Layout not wrapping pages.
-
-**Solution:**
-- Check `web/layouts/global.tsx` exists
-- Verify file naming matches page paths
-- Restart dev server after layout changes
+- Check file extensions (`.tsx`)
+- Restart dev server
 
 ## Module Not Found
 
 ```
-Error: Cannot find module '@dex/router'
+Error: Cannot find module '@dex/server'
 ```
 
 **Solution:**
-- Run `bun install` in your project
-- Check `package.json` has `@dex/*` dependencies
+- Run `bun install`
+- Verify workspace or package symlinks
 
 ## TypeScript Errors
 
@@ -54,7 +56,4 @@ Error: Cannot find module '@dex/router'
 Error: Type 'X' is not assignable to type 'Y'
 ```
 
-**Solution:**
-- Run `bun run dev` to regenerate types
-- Check `dex.config.ts` paths are correct
-- Restart TypeScript server (VS Code: `Ctrl+Shift+P` → "TypeScript: Restart TS Server")
+**Solution:** Run `dex-router generate` or restart TS server.

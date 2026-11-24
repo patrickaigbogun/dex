@@ -9,24 +9,29 @@ Create a production-ready build of your Dex app.
 ## Build
 
 ```bash
+dex build
+# or
 bun run build
 ```
 
-This:
-1. Generates routes from pages
-2. Bundles client code
-3. Compiles server binary
-4. Copies static assets
+This executes:
+1. `core/bootstrap/build.ts` via `dexBuild`
+2. Route generation (`dex-router generate`)
+3. Client bundling with ESM code-splitting (`build/assets/chunks/[name]-[hash].js`) and `?v=<hash>` cache-busting
+4. Server binary compilation (`core/runtime/server/prod.ts` → `build/server`)
+5. SSG prerendering (`dexPrerender`) and asset copying
 
-## Output
+## Output Layout
 
 ```
 build/
-├─ server           # Executable Node.js binary
-├─ index.html       # Entry HTML
-├─ assets/
+├─ server               # Compiled executable server binary
+├─ index.html           # SPA entry point
+├─ __ssg/               # Pre-rendered static pages
+├─ assets/              # Static assets and ESM chunks
 │  ├─ client.js
-│  └─ styles.css
+│  ├─ styles.css
+│  └─ chunks/           # Code-split ESM chunks ([name]-[hash].js)
 └─ core/
    └─ router/.generated/
       ├─ routes.ts
@@ -35,24 +40,12 @@ build/
 
 ## Run Locally
 
-Test before deploying:
-
 ```bash
 cd build
 PORT=7990 ./server
 ```
 
-Visit `http://localhost:7990`.
-
-## Environment Variables
-
-| Variable | Value |
-|----------|-------|
-| `PORT` | Server port (default: 7990) |
-| `NODE_ENV` | Always `production` |
-| `DEX_API_ONLY` | Set to `1` for API-only mode |
-
 ## See Also
 
 - [Production Server](../server/production) — Running in prod
-- [Platforms](./platforms) — Deploy to specific platforms
+- [Platforms](./platforms) — Deploying to specific platforms

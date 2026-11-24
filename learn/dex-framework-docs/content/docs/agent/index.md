@@ -10,18 +10,18 @@ Fast references for working inside this repo.
 
 - Packages: `framework/packages/*`
 - Example app/template: `templates/starter/`
-- Human docs: `docs/human/`
+- Documentation sections: [`../router/`](../router/), [`../server/`](../server/), [`../dev/`](../dev/), [`../cli/`](../cli/), [`../pie/`](../pie/)
 
 ## Run commands (starter)
 
 ```bash
 cd templates/starter
-bun run dev
+dex start
 ```
 
 ```bash
 cd templates/starter
-bun run build
+dex build
 cd build
 PORT=7990 ./server
 ```
@@ -35,8 +35,8 @@ DEX_API_ONLY=1 PORT=7990 ./server
 
 ## References
 
-- Router agent reference: `docs/agent/router.md`
-- Server helper reference: `docs/agent/server.md`
-- Dev supervisor reference: `docs/agent/dev.md`
-- CLI reference: `docs/agent/cli.md`
-- Pie (typed client) reference: `docs/agent/pie.md`
+- Router agent reference: [`router.md`](./router)
+- Server helper reference: [`server.md`](./server)
+- Dev supervisor reference: [`dev.md`](./dev)
+- CLI reference: [`cli.md`](./cli)
+- Pie (typed client) reference: [`pie.md`](./pie)

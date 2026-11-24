@@ -4,31 +4,40 @@ title: "Getting Started"
 
 # Getting Started with Dex
 
-Welcome! Dex is a Bun-first framework for building web applications with file-based routing, zero-config defaults, and a focus on simplicity.
+Welcome! Dex is a composable, Bun-first full-stack framework featuring a **Native Go CLI (`dex`)** (<8 MB binary, <5ms startup), file-based React routing, Elysia server helpers, SSG prerendering, and a typed OpenAPI route-tree client (`@dex/pie`).
 
 ## What You'll Learn
 
-- What Dex is and why you'd use it
-- How to scaffold your first app in 5 minutes
-- How to develop, build, and deploy
+- What Dex is and how its composable packages fit together
+- How to install the native Go CLI and scaffold your first app
+- How to develop locally, generate typed API clients, and build a standalone Bun server executable
+
+## Prerequisites
+
+- [Bun](https://bun.sh) installed (`bun --version`) for running the app runtime, bundler, and tests
 
 ## Installation
 
-Install the Dex CLI on your system:
+Install the native Go `dex` CLI on your system:
 
 ### Linux / macOS
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
 ```
 
 ### Windows (PowerShell)
+
 ```powershell
 irm https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.ps1 | iex
 ```
 
-To update an existing installation to the latest version at any time, run:
+The installer places versioned binaries under `~/.dex/versions/<version>/dex`, links the active shim at `~/.dex/bin/dex`, and keeps `~/.local/bin/dex` linked when present. To update or switch CLI versions at any time:
+
 ```bash
 dex update
+dex versions
+dex use v0.2.6
 ```
 
 ## Quick Start
@@ -48,6 +57,6 @@ Your app will be running at `http://localhost:7990`.
 
 ## Next Steps
 
-1. [What is Dex?](./what-is-dex) — Understand the philosophy and architecture
+1. [What is Dex?](./what-is-dex) — Understand the philosophy and 5-pillar architecture
 2. [Your First App](./your-first-app) — Step-by-step tutorial building a real app
-3. [How Dex Works](./how-dex-works) — Mental model for routing, layouts, and builds
+3. [How Dex Works](./how-dex-works) — Mental model for routing, layouts, SSG, and builds

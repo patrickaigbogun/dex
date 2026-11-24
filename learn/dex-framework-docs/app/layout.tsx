@@ -3,7 +3,7 @@ import './global.css';
 import { Inter } from 'next/font/google';
 import type { Metadata } from 'next';
 
-const baseUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL!);
+const baseUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000');
 
 const inter = Inter({
   subsets: ['latin'],
@@ -11,6 +11,12 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: baseUrl,
+  title: {
+    default: 'Dex — Composable Bun-First Framework',
+    template: '%s | Dex Docs',
+  },
+  description:
+    'Composable Bun-first full-stack framework with a native Go CLI, file-based React routing, Elysia server helpers, and typed OpenAPI route-tree client.',
 };
 
 export default function Layout({ children }: LayoutProps<'/'>) {

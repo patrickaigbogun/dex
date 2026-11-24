@@ -12,11 +12,11 @@ title: "Overview"
    - Landing page
    - Getting started
    - Core concepts
-   - Feature guides
-   - API reference
-   - Recipes
-   - Deployment
-   - Troubleshooting
+   - Feature guides ([Router](../router/), [Server](../server/), [Dev](../dev/), [CLI](../cli/), [Pie](../pie/))
+   - API reference ([Reference](../reference/))
+   - Recipes ([Recipes](../recipes/))
+   - Deployment ([Deployment](../deployment/))
+   - Troubleshooting ([Troubleshooting](../troubleshooting/))
    - Migration and edge cases
 
 3. Make each page do one job.
@@ -65,7 +65,7 @@ title: "Overview"
 - “Start here” for first-time users
 - “Build your first app” for a guided end-to-end path
 - “Core concepts” for packages, routing, runtime, build-time, and conventions
-- “Router”, “Server”, “Dev”, “CLI” as feature guides with full behavior coverage
+- “Router”, “Server”, “Dev”, “CLI”, “Pie” as feature guides with full behavior coverage
 - “Recipes” for real use cases like custom paths, API-only deploy, prerendering, monorepo layout
 - “Reference” for CLI flags, config fields, exported functions, and defaults
 - “Troubleshooting” for errors, build issues, and path-resolution problems

@@ -4,44 +4,44 @@ title: "Dev Reference"
 
 # Dev API Reference
 
-Reference for dev utilities.
+Reference for `@dex/dev` exports and tasks.
 
-## @dex/dev
-
-The dev process supervisor.
-
-### dexDev
-
-Start the dev process with multiple watchers.
+## Exports from `@dex/dev`
 
 ```ts
-import { dexDev } from '@dex/dev'
-
-await dexDev({
-  tasks: [
-    { name: 'router', command: 'dex-router' },
-    { name: 'styles', command: 'tailwindcss' },
-    { name: 'client', command: 'esbuild' }
-  ]
-})
+import { 
+  spawnGroup, 
+  dexDev, 
+  dexBuild, 
+  dexBuildClient, 
+  dexPrepareBuild, 
+  dexPrerender, 
+  type DexTaskOptions 
+} from '@dex/dev'
 ```
 
-## Environment Variables
+### `spawnGroup(tasks)`
+Spawns a group of subprocesses with prefixing and coordinated shutdown.
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PORT` | 7990 | Dev server port |
-| `NODE_ENV` | development | Environment |
+### `dexDev(opts: DexTaskOptions)`
+Runs development watchers and dev server supervisor.
 
-## Logs
+### `dexBuild(opts: DexTaskOptions)`
+Executes the full production build pipeline (prepare, client bundle, server compile, SSG prerender).
 
-Dev process prefixes each watcher's output:
+### `dexBuildClient(opts: DexTaskOptions)`
+Bundles client scripts with environment defines (`getPublicEnvDefines`).
 
-```
-[router] 🔄 Routes generated
-[styles] 🎨 Styles compiled
-[client] 📦 Client bundled
-```
+### `dexPrepareBuild(opts: DexTaskOptions)`
+Prepares build directories and intermediate files.
+
+### `dexPrerender(opts: DexTaskOptions)`
+Prerenders static (`ssg`) pages.
+
+### `DexTaskOptions`
+Type definition: `{ rootDir: string; defineArgs?: string[] }`.
+
+---
 
 ## See Also
 

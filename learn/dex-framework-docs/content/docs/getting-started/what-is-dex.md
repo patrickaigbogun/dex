@@ -5,53 +5,66 @@ description: "Overview and key concepts of the Dex framework"
 
 # What is Dex?
 
-Dex is a **Bun-first web framework** that combines file-based routing with a minimal configuration approach. It's designed for developers who want to ship fast web applications without wrestling with complex tooling.
+Dex is a **composable, Bun-first full-stack framework** paired with a **Native Go CLI (`dex`)** (<8 MB standalone binary, <5ms startup). It combines file-based React routing, Elysia server primitives, ESM code splitting, SSG prerendering, and typed OpenAPI API client generation without hidden magic.
 
 ## Why Dex?
 
 | Problem | Dex Solution |
 |---------|--------------|
-| Complex routing configs | File-based routing — your folder structure *is* your routes |
-| Build tool fatigue | Zero-config defaults with Bun's speed |
-| Confusing layouts | Explicit layout files that compose naturally |
-| Deployment friction | Single binary output, ready for any platform |
+| Slow JS CLI startup | Native Go CLI (`dex`) — under 8 MB binary, <5ms startup |
+| Complex routing configs | File-based routing — `web/pages/` maps directly to routes |
+| Build tool fatigue | Zero-config Bun bundling with ESM code splitting and `?v=<hash>` cache busting |
+| Confusing layouts | Explicit `web/layouts/` files that compose cleanly |
+| Untyped backend calls | `@dex/pie` generates typed route trees from JSON or YAML OpenAPI specs |
+| Deployment friction | Compiles to a standalone Bun server executable (`build/server`) |
 
 ## Key Features
 
-- **File-based routing**: `web/pages/about.tsx` → `/about`
-- **Automatic layout composition**: `web/layouts/global.tsx` wraps all pages
-- **Config-driven paths**: Customize folder structure via `dex.config.ts`
-- **SPA fallback**: Automatic client-side navigation for dynamic routes
-- **Dev/prod parity**: Same mental model, different modes
+- **Native Go CLI**: Fast scaffolding (`dex scaffold`), upstream syncing (`dex sync`), template inspection (`dex template`), multi-version switching (`dex use`), and OpenAPI codegen (`dex pie generate`).
+- **File-based routing (`@dex/router`)**: `web/pages/about.tsx` maps to `/about` with concurrent React transitions, intent prefetching, `RouterErrorBoundary`, and subdomain mounting.
+- **Elysia server helpers (`@dex/server`)**: Path-traversal-safe `/assets/*` serving, SSG-aware SPA fallback, canonical subdomain redirects, Google variable fonts injection, and SSE dev reload.
+- **Typed API client (`@dex/pie`)**: Framework-agnostic navigable route tree generated from JSON or YAML OpenAPI specs with idempotent retry safety.
+- **Dev & build orchestration (`@dex/dev`)**: Parallel dev watchers (`routes:watch`, `styles:watch`, `client:watch`, `server:dev`) and production builds with SSG prerendering.
 
 ## How It Compares
 
-| Framework | Routing | Config |
-|-----------|---------|--------|
-| Next.js | File-based | `next.config.js` |
-| Dex | File-based | `dex.config.ts` (optional) |
-| Remix | Convention-based | `remix.config.js` |
-| Express | Manual | Manual |
+| Framework | Runtime & CLI | Routing | Config |
+|-----------|---------------|---------|--------|
+| Next.js | Node.js / Rust tooling | File-based | `next.config.js` |
+| Dex | Native Go CLI + Bun + Elysia | File-based | `dex.config.ts` (optional) |
+| Remix | Node.js / Vite | Convention-based | `vite.config.ts` |
+| Express | Node.js | Manual | Manual |
 
-## When to Use Dex
+## Project Structure
 
-- Building a marketing site, blog, or dashboard
-- You want file-based routing without framework lock-in
-- Deploying to platforms that support Node/Bun binaries
-- You prefer explicit over magical
-
-## Example Structure
-
-```
+```text
 my-app/
-├─ dex.config.ts      # Optional configuration
-├─ web/
-│  ├─ pages/          # Routes (index.tsx → /)
-│  │  ├─ about.tsx    # /about
-│  │  └─ [id]/        # Dynamic route /:id
-│  ├─ layouts/        # Layout components
-│  └─ public/         # Static assets
-└─ core/              # Generated files (don't edit)
+├─ .dex/
+│  └─ metadata.json               # Template version & sync metadata
+├─ dex.config.ts                  # Optional framework configuration
+├─ package.json                   # Workspace dependencies & scripts
+├─ core/
+│  ├─ api/
+│  │  └─ generated.ts             # Generated @dex/pie OpenAPI route tree
+│  ├─ bootstrap/
+│  │  ├─ dev.ts                   # Dev supervisor entrypoint
+│  │  ├─ build.ts                 # Production build entrypoint
+│  │  ├─ scripts.ts               # Task runners (runDev, runBuild, runPrerender)
+│  │  └─ web.tsx                  # Client hydration / FileRouter mount
+│  ├─ router/.generated/          # Auto-generated routes.ts, layouts.ts, manifest.json
+│  └─ runtime/
+│     ├─ app/index.ts             # Dev Elysia server entrypoint
+│     └─ server/prod.ts           # Production server entrypoint (compiled to build/server)
+├─ lib/
+│  └─ api.ts                      # Userland @dex/pie client instance
+├─ routes/
+│  └─ api/                        # Elysia API route handlers
+├─ packages/                      # Local workspace packages (router, server, dev, pie)
+└─ web/
+   ├─ pages/                      # File-based React pages (index.tsx -> /)
+   ├─ layouts/                    # Shared & named layouts (global.tsx, etc.)
+   ├─ public/                     # index.html & dev public assets
+   └─ styles/                     # Tailwind CSS entrypoint (index.css)
 ```
 
 ## Ready to Try It?

@@ -4,11 +4,11 @@ title: "Pages And Layouts"
 
 # Pages and Layouts
 
-Pages are your route components. Layouts wrap pages with shared UI. This guide explains how they work together.
+Pages are your route components under `web/pages/`. Layouts wrap pages with shared UI from `web/layouts/`. This guide explains how they compose and how metadata works.
 
 ## Pages
 
-A page is a React component exported from `web/pages/`:
+A page is a React component exported as `default` from `web/pages/`:
 
 ```tsx
 // web/pages/about.tsx
@@ -22,16 +22,31 @@ export default function About() {
 }
 ```
 
-### Page Metadata
+### Page Metadata & Rendering Strategy
 
-Export `metadata` to customize the page:
+Export `metadata` from a page to set `<head>` metadata (applied dynamically on client navigation and injected into static HTML during SSG prerendering) and optionally override the page's rendering strategy:
 
 ```tsx
-export const metadata = {
-  title: "About Us - My Site",
-  description: "Learn more about our company.",
+import type { Metadata } from '@dex/router'
+
+export const metadata: Metadata = {
+  title: 'About Us - My Site',
+  description: 'Learn more about our company.',
+  ogTitle: 'About Us',
+  ogDescription: 'Learn more about our company.',
+  ogImage: 'https://example.com/og-about.png',
+  ogType: 'website',
+  twitterCard: 'summary_large_image',
+  renderStrategy: 'ssg',
 }
 ```
+
+Supported `Metadata` fields:
+
+- `title`, `description`
+- `ogTitle`, `ogDescription`, `ogImage`, `ogVideo`, `ogType`, `url`
+- `twitterCard` (`'summary' | 'summary_large_image' | 'player'`)
+- `renderStrategy` (`'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic'`)
 
 ## Layouts
 
@@ -43,13 +58,15 @@ Create `web/layouts/global.tsx` to wrap all pages across your application:
 
 ```tsx
 // web/layouts/global.tsx
+import { Link } from '@dex/router/client'
+
 export default function GlobalLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
       <header>
         <nav>
-          <a href="/">Home</a>
-          <a href="/about">About</a>
+          <Link to="/">Home</Link>
+          <Link to="/about">About</Link>
         </nav>
       </header>
       <main>{children}</main>
@@ -59,17 +76,17 @@ export default function GlobalLayout({ children }: { children: React.ReactNode }
 }
 ```
 
-The global layout is passed directly to `<FileRouter GlobalLayout={GlobalLayout} />` in your app bootstrap (`core/bootstrap/web.tsx`).
+The global layout is passed directly to `<FileRouter GlobalLayout={GlobalLayout} />` in `core/bootstrap/web.tsx`.
 
 ### Named Layouts
 
 Create reusable named layouts in `web/layouts/`:
 
-```
+```text
 web/layouts/
-├─ global.tsx        # Wraps all pages
-├─ dashboard.tsx     # Dashboard layout
-└─ auth.tsx          # Auth layout
+├─ global.tsx        # Passed to <FileRouter GlobalLayout={GlobalLayout} />
+├─ dashboard.tsx     # Named layout: 'dashboard'
+└─ auth.tsx          # Named layout: 'auth'
 ```
 
 Define the layout component (e.g. `web/layouts/dashboard.tsx`):
@@ -86,16 +103,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 }
 ```
 
+The router generator discovers `.ts` and `.tsx` modules in `web/layouts/` (including `folder/index.tsx` mapped to `folder`) and writes lazy loaders to `core/router/.generated/layouts.ts`.
+
 ### Applying a Layout to a Page
 
-To apply a named layout to a page, export `layout` with the layout's file name:
+To apply a named layout to a page, export `layout` as a string (or a function returning a layout name):
 
 ```tsx
 // web/pages/dashboard.tsx
-export const metadata = { title: "Dashboard" }
+export const metadata = { title: 'Dashboard' }
 
 // Selects web/layouts/dashboard.tsx
-export const layout = "dashboard"
+export const layout = 'dashboard'
 
 export default function DashboardPage() {
   return <h1>Welcome to Dashboard</h1>
@@ -104,7 +123,7 @@ export default function DashboardPage() {
 
 ### Layout Hierarchy
 
-When a page declares a layout, Dex composes them in order:
+When a page declares a layout, Dex composes them inside `<RouterErrorBoundary>` in order:
 
 1. **GlobalLayout** (from `web/layouts/global.tsx`)
 2. **Page-declared Layout** (e.g. `web/layouts/dashboard.tsx`)
@@ -123,50 +142,24 @@ Rendered output:
 </div>
 ```
 
-## Nested Layouts
+## Passing Context with `<Outlet>`
 
-For nested routes, layouts nest naturally:
+Use `<Outlet context={...} />` and `useOutletContext()` from `@dex/router/client` when sharing state from a layout or parent wrapper down to nested content.
 
-```
-web/pages/
-├─ blog/
-│  ├─ index.tsx           # Uses blog.tsx layout
-│  └─ posts/
-│     ├─ index.tsx         # Uses blog.tsx + posts.tsx layout
-│     └─ [slug].tsx        # Uses blog.tsx + posts.tsx layout
-```
+## Client-Only Components & Error Boundaries
 
-## Data in Layouts
-
-Layouts can fetch data just like pages:
-
-```tsx
-// web/layouts/blog.tsx
-import { useServerData } from '@dex/server'
-
-export default function BlogLayout({ children }) {
-  const { posts } = useServerData()
-  
-  return (
-    <div>
-      <aside>
-        {posts.map(p => <a key={p.id}>{p.title}</a>)}
-      </aside>
-      {children}
-    </div>
-  )
-}
-```
+- **`<ClientOnly fallback={...}>` / `clientOnly(Component)`**: Safely render browser-only UI on SSG-prerendered pages without hydration mismatches.
+- **`RouterErrorBoundary`**: Automatically wraps rendered views and layouts and resets on route changes; pass a custom `errorBoundary` component to `<FileRouter />` to customize error UI.
 
 ## Best Practices
 
-1. **Keep global layout minimal** — only essential elements
-2. **Use section layouts** — for repeated section-specific UI
-3. **Avoid page-level layouts** — prefer reusable section layouts
-4. **Metadata in pages** — not layouts, for better control
+1. **Keep `GlobalLayout` minimal** — reserve it for app-wide shells and navigation
+2. **Use named layouts** — group section-specific UI under `web/layouts/`
+3. **Use `<Link>` for internal navigation** — enables intent prefetching and zero-flicker transitions
+4. **Define `metadata` on pages** — ensures accurate `<head>` tags during SSG and client transitions
 
 ## See Also
 
 - [File-Based Routing](./file-based-routing) — How pages map to routes
-- [Configuration](./configuration) — Customize layout folder
-- [How Dex Works](./how-dex-works) — Build process overview
+- [Configuration](./configuration) — Customize layout folder and rendering strategy
+- [How Dex Works](../getting-started/how-dex-works) — Build and prerender overview

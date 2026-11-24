@@ -4,65 +4,37 @@ title: "Environment Config"
 
 # Environment-Specific Config
 
-Configure Dex differently for different environments.
+Configure Dex and environment variables across development and production.
 
-## Using Environment Variables
+## Using `getPublicEnvDefines()`
 
-```ts
-// dex.config.ts
-export default {
-  // Use different paths based on environment
-  pagesDir: process.env.CUSTOM_PAGES_DIR || 'web/pages',
-  
-  // Custom generated routes output
-  outRoutesTs: process.env.CUSTOM_ROUTES_TS || 'core/router/.generated/routes.ts',
-}
-```
+Dex uses `getPublicEnvDefines()` (from `@dex/server` and dev tasks) to automatically inspect `.env` and `process.env`, capturing and injecting variables prefixed with `PUBLIC_*`, `NEXT_PUBLIC_*`, and `VITE_*`.
 
-## Environment-Specific Features
+These are automatically defined during:
+- Development (`dexDev` / `client:watch`)
+- Production building (`dexBuild` / `dexBuildClient`)
 
-```ts
-export default {
-  // Set mode or port from environment
-  port: Number(process.env.PORT) || 7990,
-  mode: process.env.DEX_MODE || 'spa',
-}
-```
-
-## .env Files
-
-Create `.env` and `.env.production`:
+## Example `.env`
 
 ```bash
-# .env (development)
-NODE_ENV=development
-API_URL=http://localhost:3000
-
-# .env.production
-NODE_ENV=production
+# .env
+PORT=7990
 API_URL=https://api.example.com
+PUBLIC_SITE_NAME=My Dex App
+NEXT_PUBLIC_ANALYTICS_ID=UA-XXXXX
 ```
 
-## CLI Overrides
-
-Pass environment at build time:
-
-```bash
-NODE_ENV=production bun run build
-API_URL=https://api.example.com bun run build
-```
-
-## Using in Components
+## Consuming in Components
 
 ```tsx
 // web/pages/index.tsx
-const apiUrl = process.env.API_URL
+const siteName = process.env.PUBLIC_SITE_NAME
+const apiUrl = process.env.API_URL // Note: non-public env vars are not bundled client-side unless prefixed
 
 export default function Home() {
   return (
     <div>
-      <h1>Home</h1>
-      <p>API: {apiUrl}</p>
+      <h1>{siteName}</h1>
     </div>
   )
 }

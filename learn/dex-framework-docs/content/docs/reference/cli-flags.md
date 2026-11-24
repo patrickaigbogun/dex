@@ -23,6 +23,8 @@ dex scaffold <dir> [options]
 | `--template <path>` | — | Local template `.tgz` archive path (skips GitHub API) |
 | `--template-url <url>` | — | URL to template `.tgz` archive (skips GitHub API) |
 | `--no-install` | `false` | Skip running `bun install` after scaffolding |
+| `--no-cache` | `false` | Bypass local template cache |
+| `--fresh` | `false` | Force fresh download of template and packages |
 
 ### `dex sync`
 
@@ -35,6 +37,19 @@ dex sync [options]
 | `--interactive` | `false` | Interactively select files to sync |
 | `--repo <owner/repo>` | Metadata repo | Template repository |
 | `--tag <tag>` | Metadata releaseTag / `latest` | Release tag to sync |
+| `--force` | `false` | Force sync overwriting local changes |
+| `--no-cache` | `false` | Bypass cache during sync |
+| `--fresh` | `false` | Force fresh fetch |
+
+### `dex template <list|cache|diff>`
+
+```bash
+dex template list
+dex template cache
+dex template diff
+```
+
+Manage template cache and inspect template differences.
 
 ### `dex update`
 
@@ -59,7 +74,7 @@ List all installed versions in `~/.dex/versions/`.
 ### `dex use <version>`
 
 ```bash
-dex use <version>
+dex use <version>`
 ```
 
 Switch active version symlink to an already installed version.
@@ -113,30 +128,27 @@ bunx dex-router watch [options]
 
 ---
 
-## Dev CLI
+## Development & Build Commands
+
+Instead of legacy or fictional flags, use the actual commands and scripts:
+
+### Development
 
 ```bash
-bun run dev [options]
+dex start
+# or with port override
+dex start -p
+# or via package scripts / direct dev task
+bun run dev
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--port` | 7990 | Server port |
-| `--pagesDir` | `web/pages` | Pages directory |
-| `--no-hot` | false | Disable hot reload |
-
----
-
-## Build CLI
+### Production Build
 
 ```bash
-bun run build [options]
+dex build
+# or direct build command
+bun run build
 ```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--outDir` | `build` | Output directory |
-| `--minify` | true | Minify output |
 
 ---
 

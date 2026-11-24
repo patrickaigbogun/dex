@@ -4,31 +4,37 @@ title: "Configuration"
 
 # Configuration
 
-Dex works out of the box with sensible defaults. When you need customization, use `dex.config.ts`.
+Dex works out of the box with sensible defaults. When you need to customize folder paths, rendering strategy, subdomains, Google fonts, dev watch targets, or `@dex/pie` OpenAPI codegen, configure `dex.config.ts`.
 
 ## Default Structure
 
 By default, Dex expects this layout:
 
-```
+```text
 my-app/
 ├─ web/
 │  ├─ pages/           # Route components
 │  ├─ layouts/         # Layout components
-│  └─ public/          # Static assets
-└─ core/               # Generated files
+│  ├─ public/          # Static index.html & dev assets
+│  └─ styles/          # Tailwind CSS entrypoint (index.css)
+├─ routes/api/         # Elysia API routes
+├─ lib/api.ts          # Userland @dex/pie client
+└─ core/               # Bootstrap, runtime, and generated files
 ```
-
-No configuration needed — just start building.
 
 ## Custom Configuration
 
-Create `dex.config.ts` (or `dex.config.js` / `.mjs` / `.cjs`) in your project root:
+Create `dex.config.ts` (or `.js`, `.mjs`, `.cjs`, `.json`) in your project root:
 
 ```ts
 import type { DexConfig } from '@dex/router'
 
 export default {
+  // Server & rendering
+  mode: 'spa',
+  port: 7990,
+  renderStrategy: 'spa',
+
   // Router generation paths
   pagesDir: 'web/pages',
   layoutsDir: 'web/layouts',
@@ -36,97 +42,115 @@ export default {
   outRoutesJson: 'core/router/.generated/manifest.json',
   outLayoutsTs: 'core/router/.generated/layouts.ts',
 
-  // Server and runtime options
-  mode: 'spa',
-  port: 7990,
-  renderStrategy: 'spa',
+  // Subdomain mounting
+  subdomains: {
+    docs: '/docs',
+    admin: '/admin',
+  },
 
-  // Watch configuration
+  // Google Variable Fonts & Tailwind v4 @theme injection
+  fonts: {
+    sans: 'Inter',
+    mono: {
+      family: 'JetBrains Mono',
+      variable: '--font-mono',
+      weights: '400;500;700',
+      display: 'swap',
+    },
+  },
+
+  // @dex/pie OpenAPI codegen
+  apiSpec: 'https://api.example.com/openapi.json',
+  apiUrl: 'https://api.example.com',
+  outApiTs: 'core/api/generated.ts',
+  apiPrefix: '/api',
+
+  // Extra watch targets for @dex/server dev reload
   watchFiles: [],
   watchDirs: [],
 } satisfies DexConfig
 ```
 
-You can also export a plain object without type annotations:
-
-```ts
-export default {
-  pagesDir: 'src/pages',
-  layoutsDir: 'src/layouts',
-}
-```
-
 ## Path Precedence
 
-Dex resolves paths in this order (highest to lowest priority):
+Dex resolves configuration in this order (highest to lowest priority):
 
-1. **CLI flags** — `--pagesDir src/views`
-2. **Config file** — `dex.config.ts` values (nearest project root)
-3. **Built-in defaults** — `DEFAULT_PATHS` (`web/pages`, `web/layouts`, etc.)
+1. **CLI flags** — e.g. `--pagesDir src/views` or `--out core/api/generated.ts`
+2. **Config file** — `dex.config.*` values (resolved from the nearest parent directory)
+3. **Built-in defaults** — `DEFAULT_PATHS` (`web/pages`, `web/layouts`, `core/api/generated.ts`, `/api`, etc.)
 
-All paths are relative to the directory containing the `dex.config.*` file (project root).
+All relative paths in `dex.config.*` are resolved relative to the directory containing the config file.
 
 ## Available Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `pagesDir` | `string` | `web/pages` | Directory containing page route components (`.tsx`) |
-| `layoutsDir` | `string` | `web/layouts` | Directory containing layout components (`.tsx`, `.ts`) |
-| `outRoutesTs` | `string` | `core/router/.generated/routes.ts` | Target path for generated TypeScript route definitions |
-| `outRoutesJson` | `string` | `core/router/.generated/manifest.json` | Target path for generated route manifest JSON |
-| `outLayoutsTs` | `string` | `core/router/.generated/layouts.ts` | Target path for generated layout loader map |
 | `mode` | `string` | `'spa'` | Application mode (`'spa'` or `'mpa'`) |
-| `port` | `number` | `7990` | Server and dev server port |
-| `renderStrategy` | `string` | `'spa'` | Rendering strategy (`'spa'`, `'ssg'`, `'ssr'`, `'ppr'`, `'dynamic'`) |
-| `watchFiles` | `string[]` | `[]` | Additional file paths to watch for changes |
-| `watchDirs` | `string[]` | `[]` | Additional directories to watch for changes |
+| `port` | `number` | `7990` | Default dev and production server port |
+| `renderStrategy` | `'spa' \| 'ssg' \| 'ssr' \| 'ppr' \| 'dynamic'` | `'spa'` | Default rendering strategy for routes (`'ssg'` enables build-time prerendering) |
+| `pagesDir` | `string` | `'web/pages'` | Directory containing page route components (`.tsx`) |
+| `layoutsDir` | `string` | `'web/layouts'` | Directory containing layout components (`.tsx`, `.ts`) |
+| `outRoutesTs` | `string` | `'core/router/.generated/routes.ts'` | Target path for generated TypeScript route definitions |
+| `outRoutesJson` | `string` | `'core/router/.generated/manifest.json'` | Target path for generated route manifest JSON |
+| `outLayoutsTs` | `string` | `'core/router/.generated/layouts.ts'` | Target path for generated layout loader map |
+| `subdomains` | `Record<string, string>` | `{}` | Map subdomain names to route path prefixes (e.g. `{ docs: '/docs' }`) |
+| `fonts` | `DexFontsConfig` | `undefined` | Google Fonts / custom font specs injected into HTML `<head>` with CSS variables & `.font-<key>` classes |
+| `apiSpec` | `string` | `undefined` | OpenAPI JSON or YAML file path or URL used by `dex pie generate` |
+| `apiUrl` | `string` | `undefined` | Default API base URL embedded into `createApiClient()` |
+| `outApiTs` | `string` | `'core/api/generated.ts'` | Output path for `@dex/pie` generated TypeScript client |
+| `apiPrefix` | `string` | `'/api'` | Path prefix stripped from generated `@dex/pie` route tree |
+| `watchFiles` | `string[]` | `[]` | Additional files watched by `dexDevReloadRouter()` for SSE live reload |
+| `watchDirs` | `string[]` | `[]` | Additional directories watched by `dexDevReloadRouter()` for SSE live reload |
+
+## Subdomain Mounting (`subdomains`)
+
+When `subdomains` is configured (for example `{ docs: '/docs' }`), pass `subdomains` to `<FileRouter />` and `dexSpaFallback()`:
+
+- Visiting `docs.example.com/getting-started` transparently routes to `/docs/getting-started` while keeping `/getting-started` in the browser URL bar.
+- Visiting `example.com/docs/getting-started` issues a canonical `308` redirect on the server (or client redirect via `resolveMainDomainSubdomainRedirect`) to `docs.example.com/getting-started`.
+- Localhosts and IP addresses skip subdomain redirects so local development stays frictionless.
+
+## Fonts (`fonts`)
+
+Each entry in `fonts` accepts either a font family string (which defaults to variable weights `100..900` from Google Fonts) or an object:
+
+```ts
+fonts: {
+  sans: 'Plus Jakarta Sans',
+  serif: {
+    family: 'Newsreader',
+    variable: '--font-serif',
+    weights: '400;600',
+    ital: true,
+    display: 'swap',
+    provider: 'google', // or 'none' for local/custom fonts
+  },
+}
+```
+
+During SSG prerendering (`dexPrerender`) and dynamic fallback responses (`dexSpaFallback`), `@dex/dev` and `@dex/server` inject Google Fonts `<link>` tags, `:root` CSS variables, and `.font-<key>` utility classes. `@dex/server` also exports `generateFontThemeCss()` to emit a Tailwind v4 `@theme` block.
 
 ## CLI Overrides
 
 Override config values on the command line:
 
 ```bash
-# Override pages directory
+# Override pages directory for router generation
 bunx dex-router generate --pagesDir src/routes
 
-# Override output routes file
-bunx dex-router generate --outRoutesTs src/.generated/routes.ts
+# Override OpenAPI output and prefix for Pie
+dex pie generate ./openapi.yaml --out lib/generated-api.ts --prefix /v1
 ```
-
-## Programmatic Usage
-
-When using Dex functions directly:
-
-```ts
-import { generateFsRoutes, generateLayouts } from '@dex/router'
-
-await generateFsRoutes({
-  pagesDir: 'app/routes',
-  outTs: 'app/.generated/routes.ts',
-  outJson: 'app/.generated/manifest.json',
-})
-
-await generateLayouts({
-  layoutsDir: 'app/layouts',
-  outTs: 'app/.generated/layouts.ts',
-})
-```
-
-Passed options always take precedence over config file values.
 
 ## Environment Variables
 
-Some features respect environment variables:
-
 | Variable | Purpose |
 |----------|---------|
-| `PORT` | Dev/prod server port (default: 7990) |
-| `DEX_API_ONLY` | Set to `1` for API-only mode |
+| `PORT` | Dev/prod server port (overrides `dex.config.ts` `port`, default: `7990`) |
+| `DEX_API_ONLY` | Set to `1` or `true` to serve only API routes in production |
+| `DEX_API_SPEC` | Fallback OpenAPI spec URL/path for `dex pie generate` |
+| `PUBLIC_API_URL` / `NEXT_PUBLIC_API_URL` | Default API base URL for `dex pie generate` and client defines |
 | `NODE_ENV` | `development` or `production` |
-
-## Validation
-
-Dex validates and loads configuration files (`dex.config.ts`, `dex.config.js`, `dex.config.mjs`, `dex.config.cjs`) from the nearest parent directory relative to your working directory.
 
 ## See Also
 

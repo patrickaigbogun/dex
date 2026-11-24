@@ -8,24 +8,11 @@ Pre-render pages at build time for better performance.
 
 ## What Is SSG?
 
-SSG (Static Site Generation) renders pages to static HTML during the build process. The generated HTML is served directly without any server-side rendering.
+SSG (Static Site Generation) renders pages to static HTML during the build process (`dex build` / `dexPrerender`). The generated HTML is served directly without server-side runtime rendering.
 
-## When to Use SSG
+## Configuration & Usage
 
-- Blog sites with known routes
-- Marketing pages
-- Docs sites
-- Content-heavy sites that change infrequently
-
-## How It Works
-
-1. During build, Dex generates static HTML for specified routes
-2. Server serves pre-rendered HTML
-3. Client router takes over for navigation
-
-## Configuration
-
-Set the default rendering strategy in `dex.config.ts`:
+Set rendering strategy globally in `dex.config.ts`:
 
 ```ts
 // dex.config.ts
@@ -34,28 +21,29 @@ export default {
 }
 ```
 
-Or configure rendering strategy per-page:
+Or configure per-page via page metadata export:
 
 ```tsx
 // web/pages/blog/[slug].tsx
 export const metadata = {
   renderStrategy: 'ssg',
+  title: 'Blog Post',
+  description: 'A pre-rendered blog post',
+  ogImage: 'https://example.com/og.png',
 }
 
 export default function BlogPost() {
-  return <article>Content</article>
+  return <article>Pre-rendered content</article>
 }
 ```
 
-## Prerendering
+## How Prerendering Works
 
-During build, `dexPrerender` generates static HTML files for static routes when `renderStrategy` is set to `'ssg'`.
-
-## Performance Benefits
-
-- **Faster responses** — Static files are faster than dynamic rendering
-- **Better SEO** — Pre-rendered HTML is indexable
-- **Reduced server load** — No rendering at runtime
+1. During `dex build`, `dexPrerender` evaluates routes where `renderStrategy === 'ssg'`.
+2. Each page is rendered wrapped in `<RouterContext.Provider>` with static route state.
+3. `<head>` metadata (`metadata`) and Google Fonts (`fonts`) are injected.
+4. Output HTML files are written to `build/__ssg/` and copied to `build/<route>/index.html`.
+5. `dexSpaFallback` automatically detects and serves pre-rendered SSG HTML files at runtime.
 
 ## See Also
 
