@@ -7,9 +7,11 @@ export type PieRetryOptions = {
     maxDelayMs?: number;
     factor?: number;
     jitter?: number;
+    methods?: string[];
     retryOnStatuses?: number[];
     retryOn?: (ctx: {
         attempt: number;
+        method?: string;
         response: Response | null;
         error: unknown | null;
     }) => boolean;

@@ -14,6 +14,25 @@ export type GenerateApiOptions = {
 	defaultBaseUrl?: string
 }
 
+const MAX_SPEC_BYTES = 50 * 1024 * 1024
+
+const TS_RESERVED_WORDS = new Set([
+	'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
+	'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for',
+	'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super',
+	'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while',
+	'with', 'yield', 'let', 'static', 'implements', 'interface', 'package', 'private',
+	'protected', 'public', 'any', 'boolean', 'number', 'string', 'symbol', 'type',
+	'from', 'of',
+])
+
+function sanitizeTsIdentifier(name: string): string {
+	if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) && !TS_RESERVED_WORDS.has(name)) {
+		return name
+	}
+	return '_' + name.replace(/[^a-zA-Z0-9_$]/g, '_')
+}
+
 async function fetchOrReadSpec(spec: string | object, root: string): Promise<any> {
 	if (typeof spec === 'object' && spec !== null) {
 		return spec
@@ -27,11 +46,44 @@ async function fetchOrReadSpec(spec: string | object, root: string): Promise<any
 		if (!res.ok) {
 			throw new Error(`Failed to fetch OpenAPI spec from ${specStr}: ${res.status} ${res.statusText}`)
 		}
-		const text = await res.text()
+		const contentLength = Number(res.headers.get('content-length') || 0)
+		if (contentLength > MAX_SPEC_BYTES) {
+			throw new Error(`OpenAPI spec from ${specStr} exceeds maximum allowed size of 50 MB`)
+		}
+
+		let text: string
+		if (res.body) {
+			const reader = res.body.getReader()
+			const chunks: Uint8Array[] = []
+			let totalBytes = 0
+			while (true) {
+				const { done, value } = await reader.read()
+				if (done) break
+				totalBytes += value.byteLength
+				if (totalBytes > MAX_SPEC_BYTES) {
+					await reader.cancel().catch(() => {})
+					throw new Error(`OpenAPI spec from ${specStr} exceeds maximum allowed size of 50 MB`)
+				}
+				chunks.push(value)
+			}
+			const merged = new Uint8Array(totalBytes)
+			let offset = 0
+			for (const chunk of chunks) {
+				merged.set(chunk, offset)
+				offset += chunk.byteLength
+			}
+			text = new TextDecoder().decode(merged)
+		} else {
+			text = await res.text()
+			if (new TextEncoder().encode(text).byteLength > MAX_SPEC_BYTES) {
+				throw new Error(`OpenAPI spec from ${specStr} exceeds maximum allowed size of 50 MB`)
+			}
+		}
+
 		try {
 			return JSON.parse(text)
 		} catch {
-			return parseSimpleYaml(text)
+			return parseYaml(text)
 		}
 	}
 
@@ -40,27 +92,20 @@ async function fetchOrReadSpec(spec: string | object, root: string): Promise<any
 	try {
 		return JSON.parse(content)
 	} catch {
-		return parseSimpleYaml(content)
+		return parseYaml(content)
 	}
 }
 
-function parseSimpleYaml(yamlStr: string): any {
-	// If the user's OpenAPI is YAML, parse basic YAML or fallback to JSON if valid JSON with whitespace
-	try {
-		return JSON.parse(yamlStr)
-	} catch {}
-
-	// Simple YAML to JSON converter for common OpenAPI specs
-	const lines = yamlStr.split('\n')
-	const root: any = {}
-	// Basic fallback parsing or JSON detection
-	return root
+function parseYaml(yamlStr: string): any {
+	if (!yamlStr.trim()) return {}
+	return Bun.YAML.parse(yamlStr) ?? {}
 }
 
 function resolveRefName(ref?: string): string {
 	if (!ref) return 'any'
 	const parts = ref.split('/')
-	return parts[parts.length - 1] || 'any'
+	const raw = parts[parts.length - 1]
+	return raw ? sanitizeTsIdentifier(raw) : 'any'
 }
 
 function schemaToTsType(schema: any): string {
@@ -119,7 +164,7 @@ function generateComponentSchemas(components?: any): string {
 	const lines: string[] = []
 
 	for (const [name, schema] of Object.entries(components.schemas)) {
-		const safeName = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) ? name : `_${name.replace(/[^a-zA-Z0-9_$]/g, '_')}`
+		const safeName = sanitizeTsIdentifier(name)
 		const tsType = schemaToTsType(schema)
 
 		if (tsType.startsWith('{\n')) {
@@ -286,9 +331,11 @@ function renderTreeType(node: TreeNode, indent = 2): string {
 	if (node.dynamicChild) {
 		const { paramName, node: childNode } = node.dynamicChild
 		const childRendered = renderTreeType(childNode, indent + 2)
+		const safeParam = sanitizeTsIdentifier(paramName)
+		const safePropKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(paramName) ? paramName : JSON.stringify(paramName)
 		// Dynamic segment callable as function: (id: string | number) => ...
 		// and also supports passing object: ({ id }: { id: string | number }) => ...
-		lines.push(`${spaces}(${paramName}: string | number | { ${paramName}: string | number }): ${childRendered}`)
+		lines.push(`${spaces}(${safeParam}: string | number | { ${safePropKey}: string | number }): ${childRendered}`)
 	}
 
 	for (const op of node.operations) {
@@ -300,7 +347,10 @@ function renderTreeType(node: TreeNode, indent = 2): string {
 
 		if (op.queryParams) {
 			const qProps = Object.entries(op.queryParams)
-				.map(([k, v]) => `${k}${v.required ? '' : '?'}: ${v.type}`)
+				.map(([k, v]) => {
+					const safeKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k) ? k : JSON.stringify(k)
+					return `${safeKey}${v.required ? '' : '?'}: ${v.type}`
+				})
 				.join('; ')
 			optFields.push(`query?: { ${qProps} }`)
 		}
@@ -332,7 +382,10 @@ export async function generateApi(options: GenerateApiOptions): Promise<string> 
 	const treeRoot = buildRouteTree(spec, prefix)
 	const treeTs = renderTreeType(treeRoot, 2)
 
-	const code = `/* eslint-disable */\n// AUTO-GENERATED BY @dex/pie. DO NOT EDIT.\n// Title: ${spec.info?.title || 'API'}\n// Version: ${spec.info?.version || '1.0.0'}\n// Generated at: ${new Date().toISOString()}\n\nimport { createPie, type PieOptions, type PieResponse } from '@dex/pie'\n\n${schemasTs}\n\n/**\n * Navigable Route Tree Contract generated from OpenAPI.\n */\nexport type ApiRoutes = ${treeTs}\n\n/**\n * Preconfigured API client factory for this OpenAPI schema.\n */\nexport function createApiClient(options?: Partial<PieOptions>) {\n  return createPie<ApiRoutes>({\n    prefix: ${JSON.stringify(prefix)},\n    baseUrl: ${JSON.stringify(options.defaultBaseUrl || '')},\n    ...options,\n  })\n}\n`
+	const safeTitle = String(spec.info?.title || 'API').replace(/[\r\n\u2028\u2029]+/g, ' ')
+	const safeVersion = String(spec.info?.version || '1.0.0').replace(/[\r\n\u2028\u2029]+/g, ' ')
+
+	const code = `/* eslint-disable */\n// AUTO-GENERATED BY @dex/pie. DO NOT EDIT.\n// Title: ${safeTitle}\n// Version: ${safeVersion}\n// Generated at: ${new Date().toISOString()}\n\nimport { createPie, type PieOptions, type PieResponse } from '@dex/pie'\n\n${schemasTs}\n\n/**\n * Navigable Route Tree Contract generated from OpenAPI.\n */\nexport type ApiRoutes = ${treeTs}\n\n/**\n * Preconfigured API client factory for this OpenAPI schema.\n */\nexport function createApiClient(options?: Partial<PieOptions>) {\n  return createPie<ApiRoutes>({\n    prefix: ${JSON.stringify(prefix)},\n    baseUrl: ${JSON.stringify(options.defaultBaseUrl || '')},\n    ...options,\n  })\n}\n`
 
 	await mkdir(path.dirname(outTs), { recursive: true })
 	await writeFile(outTs, code, 'utf8')

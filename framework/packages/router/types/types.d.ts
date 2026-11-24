@@ -22,6 +22,13 @@ export type Metadata = {
     title?: string;
     description?: string;
     renderStrategy?: RenderStrategy;
+    ogTitle?: string;
+    ogDescription?: string;
+    ogImage?: string;
+    ogVideo?: string;
+    ogType?: string;
+    url?: string;
+    twitterCard?: 'summary' | 'summary_large_image' | 'player';
 };
 /**
  * Rendering strategy for a route/layout/module.

@@ -2,6 +2,8 @@ export type DexConfig = {
     mode?: string;
     port?: number;
     renderStrategy?: 'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic';
+    subdomains?: Record<string, string>;
+    fonts?: Record<string, any>;
     pagesDir?: string;
     layoutsDir?: string;
     outRoutesTs?: string;

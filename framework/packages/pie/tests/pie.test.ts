@@ -3,7 +3,7 @@ import { createPie } from '../src/client'
 import { generateApi } from '../src/generator'
 import path from 'node:path'
 import os from 'node:os'
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 describe('Pie Route Tree Proxy & Client', () => {
 	it('dispatches GET requests through nested static subroutes', async () => {
@@ -185,6 +185,131 @@ describe('Pie Route Tree Proxy & Client', () => {
 		expect(res.ok).toBe(true)
 		expect(res.data).toEqual({ success: true, attempts: 3 })
 	})
+
+	it('does NOT automatically retry POST requests on 500 status by default, while GET requests DO retry', async () => {
+		let postAttempts = 0
+		let getAttempts = 0
+
+		const mockFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') {
+				postAttempts++
+				return new Response(JSON.stringify({ message: 'Server Error' }), {
+					status: 500,
+					headers: { 'content-type': 'application/json' },
+				})
+			}
+
+			getAttempts++
+			if (getAttempts < 3) {
+				return new Response('Server Error', { status: 500 })
+			}
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: { 'content-type': 'application/json' },
+			})
+		}
+
+		type MockApi = {
+			orders: {
+				post: (opts?: any) => Promise<any>
+				get: (opts?: any) => Promise<any>
+			}
+		}
+
+		const api = createPie<MockApi>({
+			baseUrl: 'https://api.concord.chat',
+			fetch: mockFetch,
+			retry: {
+				retries: 3,
+				minDelayMs: 5,
+				maxDelayMs: 15,
+			},
+		})
+
+		const postRes = await api.orders.post({ body: { item: 'widget' } })
+		expect(postAttempts).toBe(1)
+		expect(postRes.ok).toBe(false)
+		expect(postRes.status).toBe(500)
+
+		const getRes = await api.orders.get()
+		expect(getAttempts).toBe(3)
+		expect(getRes.ok).toBe(true)
+		expect(getRes.data).toEqual({ ok: true })
+	})
+
+	it('rejects path traversal segments in client requests', async () => {
+		const mockFetch = async () => new Response('ok')
+		type MockApi = {
+			users: (id: string) => {
+				get: (opts?: any) => Promise<any>
+			}
+		}
+		const api = createPie<MockApi>({
+			baseUrl: 'https://api.concord.chat',
+			fetch: mockFetch,
+		})
+
+		await expect(api.users('..').get()).rejects.toThrow('[dex-pie] Invalid path segment: ..')
+		await expect(api.users('.').get()).rejects.toThrow('[dex-pie] Invalid path segment: .')
+		await expect(api.users('a/b').get()).rejects.toThrow('[dex-pie] Invalid path segment: a/b')
+		await expect(api.users('a\\b').get()).rejects.toThrow('[dex-pie] Invalid path segment: a\\b')
+	})
+
+	it('strips client global headers on cross-origin baseUrl overrides', async () => {
+		let capturedHeaders: Headers | undefined
+		const mockFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+			capturedHeaders = new Headers(init?.headers)
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: { 'content-type': 'application/json' },
+			})
+		}
+
+		type MockApi = {
+			voice: {
+				session: {
+					get: (opts?: any) => Promise<any>
+				}
+			}
+		}
+
+		const api = createPie<MockApi>({
+			baseUrl: 'https://api.concord.chat',
+			headers: { Authorization: 'Bearer secret-token' },
+			fetch: mockFetch,
+		})
+
+		await api.voice.session.get({
+			baseUrl: 'https://evil.example.com',
+			headers: { 'X-One-Off': '1' },
+		})
+
+		expect(capturedHeaders?.get('authorization')).toBeNull()
+		expect(capturedHeaders?.get('x-one-off')).toBe('1')
+	})
+
+	it('passes Uint8Array body directly and wires timeoutMs signal', async () => {
+		let capturedInit: RequestInit | undefined
+		const mockFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+			capturedInit = init
+			return new Response('ok')
+		}
+
+		type MockApi = {
+			upload: {
+				post: (opts?: any) => Promise<any>
+			}
+		}
+
+		const api = createPie<MockApi>({
+			baseUrl: 'https://api.concord.chat',
+			fetch: mockFetch,
+		})
+
+		const payload = new Uint8Array([1, 2, 3])
+		await api.upload.post({ body: payload, timeoutMs: 250 })
+
+		expect(capturedInit?.body).toBe(payload)
+		expect(capturedInit?.signal).toBeDefined()
+	})
 })
 
 describe('OpenAPI Code Generator', () => {
@@ -308,5 +433,154 @@ describe('OpenAPI Code Generator', () => {
 		expect(generatedCode).toContain('export function createApiClient')
 		expect(generatedCode).toContain("prefix: \"/api\"")
 		expect(generatedCode).toContain('baseUrl: "http://localhost:4000"')
+	})
+
+	it('accurately parses a YAML OpenAPI specification and generates the typed route tree', async () => {
+		const yamlSpec = `
+openapi: "3.0.0"
+info:
+  title: YAML Demo API
+  version: "2.1.0"
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        count:
+          type: integer
+paths:
+  /api/widgets:
+    get:
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Widget"
+  /api/widgets/{widgetId}:
+    get:
+      parameters:
+        - name: widgetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+`
+
+		const tmpDir = path.join(os.tmpdir(), `dex-pie-yaml-test-${Date.now()}`)
+		mkdirSync(tmpDir, { recursive: true })
+		const specPath = path.join(tmpDir, 'openapi.yaml')
+		const outPath = path.join(tmpDir, 'core/api/generated.ts')
+		writeFileSync(specPath, yamlSpec, 'utf8')
+
+		try {
+			const resultPath = await generateApi({
+				spec: specPath,
+				outTs: outPath,
+				prefix: '/api',
+				defaultBaseUrl: 'http://localhost:4000',
+			})
+
+			expect(resultPath).toBe(outPath)
+			const generatedCode = readFileSync(outPath, 'utf8')
+
+			expect(generatedCode).toContain('// Title: YAML Demo API')
+			expect(generatedCode).toContain('// Version: 2.1.0')
+			expect(generatedCode).toContain('export interface Widget')
+			expect(generatedCode).toContain('id: string')
+			expect(generatedCode).toContain('count?: number')
+			expect(generatedCode).toContain('widgets:')
+			expect(generatedCode).toContain('(widgetId: string | number | { widgetId: string | number }):')
+			expect(generatedCode).toContain('Promise<PieResponse<Widget[], unknown>>')
+			expect(generatedCode).toContain('Promise<PieResponse<Widget, unknown>>')
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true })
+		}
+	})
+
+	it('sanitizes newline injection in info.title, invalid param names, query param keys, and $ref names', async () => {
+		const maliciousSpec = {
+			openapi: '3.0.0',
+			info: {
+				title: 'Evil API\nconsole.log("pwned")\r\n// injected',
+				version: '1.0.0\n// bad',
+			},
+			components: {
+				schemas: {
+					'Bad Schema; alert(1)': {
+						type: 'object',
+						properties: {
+							ok: { type: 'string' },
+						},
+					},
+					class: {
+						type: 'string',
+					},
+				},
+			},
+			paths: {
+				'/api/items/{item-id}': {
+					get: {
+						parameters: [
+							{ name: 'item-id', in: 'path', required: true, schema: { type: 'string' } },
+							{ name: 'filter-by', in: 'query', schema: { type: 'string' } },
+						],
+						responses: {
+							'200': {
+								content: {
+									'application/json': {
+										schema: { $ref: '#/components/schemas/Bad Schema; alert(1)' },
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		const tmpDir = path.join(os.tmpdir(), `dex-pie-sanitize-test-${Date.now()}`)
+		mkdirSync(tmpDir, { recursive: true })
+		const outPath = path.join(tmpDir, 'core/api/generated.ts')
+
+		try {
+			await generateApi({
+				spec: maliciousSpec,
+				outTs: outPath,
+				prefix: '/api',
+			})
+			const generatedCode = readFileSync(outPath, 'utf8')
+
+			expect(generatedCode).toContain('// Title: Evil API console.log("pwned") // injected')
+			expect(generatedCode).not.toContain('// Title: Evil API\n')
+			expect(generatedCode).toContain('// Version: 1.0.0 // bad')
+			expect(generatedCode).toContain('export interface _Bad_Schema__alert_1_')
+			expect(generatedCode).toContain('export type _class = string')
+			expect(generatedCode).toContain('(_item_id: string | number | { "item-id": string | number }):')
+			expect(generatedCode).toContain('"filter-by"?: string')
+			expect(generatedCode).toContain('Promise<PieResponse<_Bad_Schema__alert_1_, unknown>>')
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true })
+		}
 	})
 })

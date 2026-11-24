@@ -4,48 +4,10 @@ import type {
 	PieOptions,
 	PieRequestOptions,
 	PieResponse,
-	PieRetryOptions,
 } from './types'
+import { computeDelayMs, normalizeRetryOptions, shouldRetryAttempt, sleep } from './retry'
 
 const HTTP_VERBS = new Set(['get', 'post', 'put', 'delete', 'patch', 'head', 'options'])
-
-function sleep(ms: number) {
-	return new Promise((r) => setTimeout(r, ms))
-}
-
-function clamp(n: number, min: number, max: number) {
-	return Math.max(min, Math.min(max, n))
-}
-
-function computeDelayMs(opts: Required<PieRetryOptions>, attempt: number) {
-	const base = opts.minDelayMs * Math.pow(opts.factor, Math.max(0, attempt - 1))
-	const capped = clamp(base, opts.minDelayMs, opts.maxDelayMs)
-	const jitter = capped * opts.jitter * Math.random()
-	return Math.round(capped + jitter)
-}
-
-function defaultRetryOnStatuses() {
-	return [408, 425, 429, 500, 502, 503, 504]
-}
-
-function normalizeRetryOptions(input?: PieRetryOptions): Required<PieRetryOptions> {
-	const statuses = input?.retryOnStatuses ?? defaultRetryOnStatuses()
-	return {
-		retries: input?.retries ?? 2,
-		minDelayMs: input?.minDelayMs ?? 150,
-		maxDelayMs: input?.maxDelayMs ?? 1500,
-		factor: input?.factor ?? 2,
-		jitter: input?.jitter ?? 0.2,
-		retryOnStatuses: statuses,
-		retryOn:
-			input?.retryOn ??
-			(({ response, error }) => {
-				if (error) return true
-				if (response) return statuses.includes(response.status)
-				return false
-			}),
-	}
-}
 
 async function resolveHeaders(
 	globalHeaders: PieOptions['headers'],
@@ -100,6 +62,49 @@ function formatQueryString(query?: Record<string, any>): string {
 	return qs ? `?${qs}` : ''
 }
 
+function isAbsoluteUrl(val: string): boolean {
+	return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(val.trim())
+}
+
+function isCrossOriginOverride(clientBaseUrl: string | undefined, overrideBaseUrl: string | undefined): boolean {
+	if (!overrideBaseUrl) return false
+	const trimmedOverride = overrideBaseUrl.trim()
+	if (!trimmedOverride) return false
+	if (trimmedOverride.startsWith('//')) return true
+
+	const effectiveClientBase = (clientBaseUrl ?? getDefaultBaseUrl()).trim()
+	const browserOrigin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : null
+
+	if (isAbsoluteUrl(trimmedOverride)) {
+		try {
+			const overrideOrigin = new URL(trimmedOverride).origin
+			if (effectiveClientBase && isAbsoluteUrl(effectiveClientBase)) {
+				return overrideOrigin !== new URL(effectiveClientBase).origin
+			}
+			if (browserOrigin) {
+				return overrideOrigin !== browserOrigin
+			}
+			return true
+		} catch {
+			return true
+		}
+	}
+
+	if (effectiveClientBase && isAbsoluteUrl(effectiveClientBase)) {
+		try {
+			const clientOrigin = new URL(effectiveClientBase).origin
+			if (browserOrigin) {
+				return new URL(trimmedOverride, browserOrigin).origin !== clientOrigin
+			}
+			return true
+		} catch {
+			return true
+		}
+	}
+
+	return false
+}
+
 async function executeRequest<TData, TError>(
 	method: string,
 	segments: string[],
@@ -109,13 +114,23 @@ async function executeRequest<TData, TError>(
 	const base = (options?.baseUrl ?? clientOptions.baseUrl ?? getDefaultBaseUrl()).replace(/\/+$/, '')
 	const prefix = (clientOptions.prefix ?? '').replace(/^\/+|\/+$/g, '')
 
-	const normalizedSegments = segments.filter(Boolean).map((s) => encodeURIComponent(String(s).trim()))
+	const normalizedSegments: string[] = []
+	for (const s of segments) {
+		if (!s) continue
+		const trimmed = String(s).trim()
+		if (!trimmed) continue
+		if (trimmed === '.' || trimmed === '..' || trimmed.includes('/') || trimmed.includes('\\')) {
+			throw new Error(`[dex-pie] Invalid path segment: ${s}`)
+		}
+		normalizedSegments.push(encodeURIComponent(trimmed))
+	}
 	const allParts = [prefix, ...normalizedSegments].filter(Boolean)
 	const path = '/' + allParts.join('/')
 	const qs = formatQueryString(options?.query)
 	const fullUrl = `${base}${path}${qs}`
 
-	const headers = await resolveHeaders(clientOptions.headers, options?.headers)
+	const skipGlobalHeaders = isCrossOriginOverride(clientOptions.baseUrl, options?.baseUrl)
+	const headers = await resolveHeaders(skipGlobalHeaders ? undefined : clientOptions.headers, options?.headers)
 
 	let body: BodyInit | undefined = undefined
 	if (options?.body !== undefined) {
@@ -125,9 +140,10 @@ async function executeRequest<TData, TError>(
 			rawBody instanceof FormData ||
 			rawBody instanceof Blob ||
 			rawBody instanceof URLSearchParams ||
-			rawBody instanceof ArrayBuffer
+			rawBody instanceof ArrayBuffer ||
+			rawBody instanceof Uint8Array
 		) {
-			body = rawBody
+			body = rawBody as BodyInit
 		} else {
 			body = JSON.stringify(rawBody)
 			if (!headers.has('content-type')) {
@@ -138,6 +154,7 @@ async function executeRequest<TData, TError>(
 
 	const fetchFn = clientOptions.fetch ?? globalThis.fetch
 	const retry = normalizeRetryOptions(clientOptions.retry)
+	const upperMethod = method.toUpperCase()
 
 	let lastResponse: Response | null = null
 	let lastError: unknown | null = null
@@ -146,11 +163,20 @@ async function executeRequest<TData, TError>(
 		lastError = null
 		lastResponse = null
 
+		const timeoutSignal =
+			options?.timeoutMs && options.timeoutMs > 0
+				? AbortSignal.timeout(options.timeoutMs)
+				: undefined
+		const signal =
+			options?.signal && timeoutSignal
+				? AbortSignal.any([options.signal, timeoutSignal])
+				: (options?.signal ?? timeoutSignal)
+
 		const init: RequestInit = {
-			method: method.toUpperCase(),
+			method: upperMethod,
 			headers,
 			body,
-			signal: options?.signal,
+			signal,
 		}
 
 		if (clientOptions.onRequest) {
@@ -165,7 +191,7 @@ async function executeRequest<TData, TError>(
 				await clientOptions.onResponse({ response: res, url: fullUrl })
 			}
 
-			const shouldRetry = retry.retryOn({ attempt, response: res, error: null })
+			const shouldRetry = shouldRetryAttempt(retry, { attempt, method: upperMethod, response: res, error: null })
 			if (!shouldRetry || attempt > retry.retries) {
 				break
 			}
@@ -175,7 +201,7 @@ async function executeRequest<TData, TError>(
 				await clientOptions.onError({ error: err, url: fullUrl })
 			}
 
-			const shouldRetry = retry.retryOn({ attempt, response: null, error: err })
+			const shouldRetry = shouldRetryAttempt(retry, { attempt, method: upperMethod, response: null, error: err })
 			if (!shouldRetry || attempt > retry.retries) {
 				break
 			}
