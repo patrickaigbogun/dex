@@ -2,6 +2,22 @@
 
 All notable changes to the Dex framework, packages, templates, and CLI are documented in this file.
 
+## [v0.4.0] - 2026-11-24
+
+### Performance & Benchmarking
+- Added 6-suite benchmark harness (`framework/benchmarks/`) covering route generation, 1k-route matching, SSG prerender throughput, client ESM bundle budgets, server/SSE fan-out, watcher memory, and Go CLI latency, enforced in CI via `bun run bench:check`.
+- Optimized `@dex/router` `findMatchingRoute` with a `WeakMap`-cached O(1) static map and first-segment bucket index (28x faster on 1,000 routes).
+
+### Deployments & Production Readiness
+- Added **Vercel Build Output API v3** adapter (`dexBuildVercel`) with automated CI contract test suite (`vercel-deploy.test.ts`), immutable `/assets/*` headers, subdomain rewrites, `/__dev/*` 404 blocking, and bundled Elysia serverless function (`api.func`).
+- Stripped the `/__dev/reload` SSE script automatically from production HTML in `dexPrepareBuild`.
+- Added `dex deploy <vercel|netlify|cloudflare|railway|render|docker>` in Go and TS CLIs, provider config generators (`dexPrepareProvider`), and official Dex-CLI-powered multi-stage `Dockerfile` & `docker-compose.yml` (`templates/docker/`).
+
+### Validation, Watchers & Templates
+- Added `@dex/validation` (zero-dep Standard Schema v1 & Zod-compatible validation with built-in `v.*` builder, `dexValidate` Elysia middleware, `useValidatedParams`/`useValidatedQuery` React hooks, and prototype-pollution guards).
+- Upgraded `watchAndGenerate()` with structured `[dex-router]` warnings (`EMFILE`/`ENOSPC` hints), clean `.stop()` / `AbortSignal` teardown, and `--no-watch` mode in `dexDev`.
+- Updated all template `package.json` scripts to invoke the `dex` CLI directly (`dex start`, `dex build`, `dex start -p`) and added curated templates (`fullstack-typed-api`, `with-validation`, `with-auth`, `with-database`, `ssg`, `docker`).
+
 ## [v0.3.0] - 2026-11-24
 
 ### Added

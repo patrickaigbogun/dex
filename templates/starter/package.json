@@ -6,9 +6,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun core/bootstrap/dev.ts",
-    "build": "bun core/bootstrap/build.ts",
-    "start": "NODE_ENV=production ./build/server"
+    "dev": "dex start",
+    "build": "dex build",
+    "start": "dex start -p"
   },
   "dependencies": {
     "@dex/router": "workspace:*",

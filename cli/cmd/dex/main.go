@@ -15,7 +15,7 @@ import (
 )
 
 // Version is set at compile time via -ldflags="-X main.Version=vX.Y.Z"
-var Version = "0.3.0"
+var Version = "0.4.0"
 
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `dex

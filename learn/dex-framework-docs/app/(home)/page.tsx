@@ -102,7 +102,7 @@ export default function HomePage() {
           <div className="mx-auto max-w-3xl text-center">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-fd-border bg-fd-secondary/60 px-3.5 py-1.5 text-xs font-medium text-fd-foreground">
               <Sparkles className="size-3.5 text-fd-primary" />
-              <span>Dex v0.3.0 • Native Go CLI &amp; Bun Runtime</span>
+              <span>Dex v0.4.0 • Native Go CLI &amp; Bun Runtime</span>
             </div>
 
             <h1 className="text-4xl font-bold tracking-tight text-fd-foreground sm:text-6xl">
@@ -205,14 +205,14 @@ dex scaffold my-app && cd my-app && dex start`}</code>
                 <span>Release Highlights</span>
               </div>
               <h2 className="text-2xl font-bold tracking-tight text-fd-foreground sm:text-3xl">
-                What&apos;s New in v0.3.0
+                What&apos;s New in v0.4.0
               </h2>
             </div>
             <Link
               href="/docs/getting-started"
               className="inline-flex items-center gap-1.5 text-sm font-medium text-fd-primary hover:underline"
             >
-              <span>Get started with v0.3.0</span>
+              <span>Get started with v0.4.0</span>
               <ArrowRight className="size-4" />
             </Link>
           </div>

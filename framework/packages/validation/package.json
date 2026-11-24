@@ -1,6 +1,6 @@
 {
   "name": "@dex/validation",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "type": "module",
   "exports": {
@@ -18,7 +18,7 @@
     "types"
   ],
   "peerDependencies": {
-    "@dex/router": "^0.3.0",
+    "@dex/router": "^0.4.0",
     "elysia": "^1.4.21",
     "react": "^19.0.0"
   },
