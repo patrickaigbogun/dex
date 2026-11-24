@@ -1,6 +1,6 @@
 {
   "name": "@dex/server",
-  "version": "0.2.1",
+  "version": "0.2.6",
   "private": false,
   "type": "module",
   "exports": {

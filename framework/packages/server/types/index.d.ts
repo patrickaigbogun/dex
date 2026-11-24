@@ -1,4 +1,5 @@
 import { Elysia } from 'elysia';
+import { type DexFontsConfig } from './fonts';
 /**
  * Serve static assets from a directory at `/assets/*`.
  */
@@ -105,11 +106,37 @@ export declare function dexDevReloadRouter(opts?: {
     standaloneSchema: {};
     response: {};
 }>;
+export interface DexHeadMeta {
+    title?: string | null;
+    description?: string | null;
+    ogTitle?: string | null;
+    ogDescription?: string | null;
+    ogImage?: string | null;
+    ogVideo?: string | null;
+    ogType?: string | null;
+    url?: string | null;
+    twitterCard?: 'summary' | 'summary_large_image' | 'player' | null;
+}
 /**
- * SPA fallback that serves the index HTML for non-asset GET requests.
+ * Inject head title, description, Open Graph, and Twitter metadata into HTML before </head>.
+ */
+export declare function injectHeadMeta(html: string, meta: DexHeadMeta): string;
+/**
+ * SPA fallback that serves prerendered SSG pages or the index HTML for non-asset GET requests.
  */
 export declare function dexSpaFallback(opts: {
     indexHtmlPath: string;
+    ssgDir?: string;
+    subdomains?: Record<string, string>;
+    fonts?: DexFontsConfig;
+    trustProxy?: boolean;
+    allowedHosts?: string[];
+    resolveHead?: (ctx: {
+        pathname: string;
+        url: URL;
+        hostname: string;
+        request: Request;
+    }) => Promise<DexHeadMeta | null> | DexHeadMeta | null;
 }): Elysia<"", {
     decorator: {};
     store: {};
@@ -135,7 +162,7 @@ export declare function dexSpaFallback(opts: {
             query: unknown;
             headers: unknown;
             response: {
-                200: Bun.BunFile | "Method Not Allowed" | "Not Found";
+                200: Response | Bun.BunFile | "Method Not Allowed" | "Not Found" | "Bad Path" | "Forbidden";
                 422: {
                     type: "validation";
                     on: string;
@@ -197,3 +224,4 @@ export declare function dexPrettyLogger(opts?: {
 }>;
 export * from './env';
 export * from './port';
+export * from './fonts';

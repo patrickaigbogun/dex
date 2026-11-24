@@ -15,6 +15,7 @@ export async function isPortAvailable(port: number): Promise<boolean> {
 export async function findAvailablePort(startPort: number, maxAttempts = 100): Promise<number> {
     let port = startPort
     for (let i = 0; i < maxAttempts; i++) {
+        if (port > 65535) break
         if (await isPortAvailable(port)) return port
         port++
         if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, 10))
