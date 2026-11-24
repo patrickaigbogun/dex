@@ -44,5 +44,8 @@ export declare function watchAndGenerate(opts?: {
     outRoutesTs?: string;
     outRoutesJson?: string;
     outLayoutsTs?: string;
-}): Promise<void>;
+    signal?: AbortSignal;
+}): Promise<{
+    stop: () => void;
+}>;
 export {};
