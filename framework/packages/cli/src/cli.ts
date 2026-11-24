@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile, mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -29,7 +29,7 @@ function usage(exitCode = 0): never {
 
 Usage:
   dex scaffold <dir>
-  dex sync [--interactive]
+  dex sync [--interactive] [--no-cache | --fresh] [--force]
   dex update [version] [--force]
   dex versions | dex list
   dex use <version>
@@ -37,6 +37,7 @@ Usage:
   dex build
   dex start [-p]
   dex pie generate [spec-url-or-file] [--out <path>] [--prefix <prefix>]
+  dex template <list|cache|diff>
 
 Update options:
   [version]                  Target version/tag (default: latest release)
@@ -123,7 +124,7 @@ async function fetchWithTimeout(url: string, init?: RequestInit) {
 	}
 }
 
-function parseArgs(argv: string[]) {
+export function parseArgs(argv: string[]) {
 	const positional: string[] = []
 	const flags: Record<string, string | boolean> = {}
 	for (let i = 0; i < argv.length; i++) {
@@ -132,7 +133,7 @@ function parseArgs(argv: string[]) {
 			positional.push(a)
 			continue
 		}
-		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f') {
+		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f' || a === '--no-cache' || a === '--fresh' || a === '--all' || a === '--force' || a === '--interactive') {
 			flags[a.replace(/^--?/, '')] = true
 			continue
 		}
@@ -229,18 +230,26 @@ async function getLatestReleaseTag(repo: string): Promise<string | null> {
 	}
 }
 
-type TemplateDiff = {
+export type TemplateDiff = {
 	version: string
 	previousVersion: string | null
 	changedFiles: string[]
+	deletedFiles?: string[]
+	checksums?: Record<string, string>
 }
 
 async function fetchTemplateDiff(repo: string, tag: string): Promise<TemplateDiff | null> {
+	validateTag(tag)
 	const asset = `dex-diff-${tag}.json`
 	const url = `https://github.com/${repo}/releases/download/${encodeURIComponent(tag)}/${asset}`
 	
 	const headers: Record<string, string> = {}
-	if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+	if (process.env.GITHUB_TOKEN) {
+		const parsedUrl = new URL(url)
+		if (parsedUrl.protocol === 'https:' && (parsedUrl.hostname === 'api.github.com' || parsedUrl.hostname === 'github.com')) {
+			headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+		}
+	}
 
 	try {
 		const res = await fetchWithTimeout(url, { headers })
@@ -295,6 +304,7 @@ Options:
 	const currentTag = metadata.version || metadata.releaseTag || null
 
 	let targetTag = (flags.tag as string | undefined) ?? (flags.to as string | undefined)
+	if (targetTag) validateTag(targetTag)
 	if (!targetTag || targetTag === 'latest') {
 		targetTag = await step('Fetch latest release info', async () => {
 			const rel = await getLatestReleaseTag(repo)
@@ -343,26 +353,60 @@ Options:
 
 	await step('Download and sync template', async () => {
 		const templateAsset = 'dex-template-spa.tgz'
-		const { path: tgzPath } = await getTemplateTgzPath(repo, targetTag, templateAsset)
+		const noCache = Boolean(flags['no-cache'] || flags.fresh)
+		const { path: tgzPath } = await getTemplateTgzPath(repo, targetTag, templateAsset, { noCache })
 
-		const tempExtractDir = path.join(os.tmpdir(), `dex-sync-${Date.now()}`)
+		const tempExtractDir = await mkdtemp(path.join(os.tmpdir(), 'dex-sync-'))
 		await mkdir(tempExtractDir, { recursive: true })
 
 		try {
 			await extractTemplate(tgzPath, tempExtractDir)
 
 			for (const file of filesToSync) {
-				const src = path.join(tempExtractDir, file)
-				const dst = path.join(found.root, file)
+				const src = safeJoin(tempExtractDir, file)
+				const dst = safeJoin(found.root, file)
 
 				if (!existsSync(src)) {
 					process.stdout.write(`   ⊘ source not found: ${file}\n`)
 					continue
 				}
 
+				if (diff.checksums?.[file]) {
+					const fileContent = await readFile(src)
+					const actualHash = crypto.createHash('sha256').update(fileContent).digest('hex')
+					const expectedHash = diff.checksums[file]
+					if (actualHash !== expectedHash) {
+						throw new Error(`Checksum verification failed for ${file} (expected ${expectedHash}, got ${actualHash})`)
+					}
+				}
+
 				await mkdir(path.dirname(dst), { recursive: true })
 				await Bun.write(dst, Bun.file(src))
 				process.stdout.write(`   ✓ ${file}\n`)
+			}
+
+			if (diff.deletedFiles && diff.deletedFiles.length > 0) {
+				const existingDeleted: string[] = []
+				for (const dFile of diff.deletedFiles) {
+					const dDst = safeJoin(found.root, dFile)
+					if (existsSync(dDst)) {
+						existingDeleted.push(dFile)
+					}
+				}
+				if (existingDeleted.length > 0) {
+					let shouldRemove = Boolean(flags.force)
+					if (!shouldRemove) {
+						shouldRemove = await promptConfirm(`Would you like to remove ${existingDeleted.length} obsolete upstream file(s) (${existingDeleted.join(', ')})?`)
+					}
+					if (shouldRemove) {
+						const { rm } = await import('node:fs/promises')
+						for (const dFile of existingDeleted) {
+							const dDst = safeJoin(found.root, dFile)
+							await rm(dDst, { force: true })
+							process.stdout.write(`   🗑 removed obsolete: ${dFile}\n`)
+						}
+					}
+				}
 			}
 		} finally {
 			// cleanup temp dir
@@ -384,21 +428,37 @@ Options:
 	process.exit(0)
 }
 
+export function validateTag(tag: string): string {
+	if (typeof tag !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(tag) || tag.includes('..')) {
+		throw new Error(`Invalid tag/version: ${tag}`)
+	}
+	return tag
+}
+
+function validateRepo(repo: string): string {
+	if (typeof repo !== 'string' || !/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo)) {
+		throw new Error(`Invalid repository format: ${repo}`)
+	}
+	const [owner, name] = repo.split('/')
+	if (!owner || !name || owner === '.' || owner === '..' || owner.includes('..') || name === '.' || name === '..' || name.includes('..')) {
+		throw new Error(`Invalid repository: ${repo}`)
+	}
+	return repo
+}
+
 function repoFromEnvOrFlag(flags: Record<string, string | boolean>): string {
 	const repo = (flags.repo as string | undefined) ?? process.env.DEX_TEMPLATE_REPO
 	if (!repo) return 'patrickaigbogun/dex'
 	if (typeof repo !== 'string') {
 		throw new Error('Missing template repo. Provide --repo <owner/repo> or set DEX_TEMPLATE_REPO.')
 	}
-	if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error(`Invalid --repo format: ${repo}`)
-	return repo
+	return validateRepo(repo)
 }
 
 function packageRepoFromEnvOrFlag(flags: Record<string, string | boolean>): string | null {
 	const repo = (flags['packages-repo'] as string | undefined) ?? process.env.DEX_PACKAGE_REPO
 	if (!repo) return null
-	if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error(`Invalid package repo format: ${repo}`)
-	return repo
+	return validateRepo(repo)
 }
 
 function packageTagFromEnvOrFlag(flags: Record<string, string | boolean>): string | null {
@@ -453,7 +513,7 @@ function latestCacheTtlMs() {
 	return Number.isFinite(n) && n >= 0 ? n : 30 * 60 * 1000
 }
 
-function cachePathForTemplate(repo: string, tag: string, assetName: string) {
+export function cachePathForTemplate(repo: string, tag: string, assetName: string) {
 	const safeRepo = repo.replace(/\//g, '__')
 	return path.join(cacheRootDir(), 'templates', safeRepo, tag, assetName)
 }
@@ -502,14 +562,14 @@ async function downloadToFile(url: string, filePath: string) {
 	}
 }
 
-function cachePathForTemplateUrl(url: string) {
-	const hash = crypto.createHash('sha1').update(url).digest('hex')
+export function cachePathForTemplateUrl(url: string) {
+	const hash = crypto.createHash('sha256').update(url).digest('hex')
 	return path.join(cacheRootDir(), 'templates', 'url', `${hash}.tgz`)
 }
 
-async function getTemplateTgzPathFromUrl(url: string) {
+async function getTemplateTgzPathFromUrl(url: string, opts?: { noCache?: boolean }) {
 	const cachePath = cachePathForTemplateUrl(url)
-	if (existsSync(cachePath)) return { path: cachePath, cache: 'hit' as const }
+	if (!opts?.noCache && existsSync(cachePath)) return { path: cachePath, cache: 'hit' as const }
 	await mkdir(path.dirname(cachePath), { recursive: true })
 	const tmp = `${cachePath}.tmp-${process.pid}-${Date.now()}`
 	await downloadToFile(url, tmp)
@@ -517,11 +577,11 @@ async function getTemplateTgzPathFromUrl(url: string) {
 	return { path: cachePath, cache: 'miss' as const }
 }
 
-async function getTemplateTgzPath(repo: string, tag: string, assetName: string) {
+async function getTemplateTgzPath(repo: string, tag: string, assetName: string, opts?: { noCache?: boolean }) {
 	const cachePath = cachePathForTemplate(repo, tag, assetName)
 	const ttlMs = latestCacheTtlMs()
 
-	if (existsSync(cachePath)) {
+	if (!opts?.noCache && existsSync(cachePath)) {
 		if (tag !== 'latest') return { path: cachePath, cache: 'hit' as const }
 		try {
 			const s = await stat(cachePath)
@@ -566,17 +626,27 @@ function octalToNumber(oct: string) {
 	return Number.parseInt(t, 8)
 }
 
-function safeJoin(destRoot: string, rel: string) {
-	const normalized = rel.replace(/\\/g, '/').replace(/^\//, '')
-	const parts = normalized.split('/').filter(Boolean)
-	if (parts.some((p) => p === '..' || p.includes(':'))) throw new Error(`Unsafe path in template: ${rel}`)
-	return path.join(destRoot, ...parts)
+export function safeJoin(destRoot: string, rel: string) {
+	if (typeof rel !== 'string' || rel.includes('\0') || !rel.trim() || rel === '.') {
+		throw new Error(`Unsafe path in template: ${rel}`)
+	}
+	const normalized = rel.replace(/\\/g, '/')
+	const parts = normalized.split(/[\\/]/)
+	if (parts.some((p) => p === '.' || p === '..' || p.includes(':'))) {
+		throw new Error(`Unsafe path in template: ${rel}`)
+	}
+	const resolvedDest = path.resolve(destRoot)
+	const resolvedPath = path.resolve(resolvedDest, ...parts)
+	if (!resolvedPath.startsWith(resolvedDest + path.sep)) {
+		throw new Error(`Unsafe path in template: ${rel}`)
+	}
+	return resolvedPath
 }
 
 async function extractTarGz(buf: Uint8Array, destDir: string) {
 	// gunzip
 	const zlib = await import('node:zlib')
-	const tar = zlib.gunzipSync(buf)
+	const tar = zlib.gunzipSync(buf, { maxOutputLength: 256 * 1024 * 1024 })
 
 	let offset = 0
 	const block = 512
@@ -588,9 +658,17 @@ async function extractTarGz(buf: Uint8Array, destDir: string) {
 		const name = nameRaw.replace(/\0.*$/, '')
 		if (!name) break
 
+		if (name.startsWith('/') || name.replace(/\\/g, '/').split('/').includes('..')) {
+			throw new Error(`Unsafe path in archive: ${name}`)
+		}
+
 		const sizeRaw = Buffer.from(header.subarray(124, 136)).toString('utf8')
 		const size = octalToNumber(sizeRaw)
 		const typeflag = String.fromCharCode(header[156] || 0)
+
+		if (typeflag === '1' || typeflag === '2') {
+			throw new Error(`Unsafe symlink/hardlink in archive: ${name}`)
+		}
 
 		const fileData = tar.subarray(offset, offset + size)
 		const padded = Math.ceil(size / block) * block
@@ -619,41 +697,7 @@ async function extractTarGz(buf: Uint8Array, destDir: string) {
 	}
 }
 
-async function tryExtractWithSystemTar(tgzPath: string, destDir: string): Promise<boolean> {
-	const tar = (Bun as any).which?.('tar') as string | undefined
-	if (!tar) return false
-
-	// Basic path safety check using tar listing. This doesn't cover every tar edge case,
-	// but it prevents obvious traversal in file names and keeps behavior consistent
-	// with our safeJoin stripping logic.
-	const listProc = Bun.spawn([tar, '-tzf', tgzPath], { stdout: 'pipe', stderr: 'pipe' })
-	const listText = await new Response(listProc.stdout).text()
-	const listCode = await listProc.exited
-	if (listCode !== 0) return false
-
-	for (const rawName of listText.split('\n')) {
-		const name = rawName.trim()
-		if (!name) continue
-		const parts = name.replace(/\\/g, '/').split('/').filter(Boolean)
-		const rel = parts.length > 1 ? parts.slice(1).join('/') : ''
-		if (!rel) continue
-		// Validate the *stripped* path, matching extractTarGz's behavior.
-		safeJoin(destDir, rel)
-	}
-
-	const extractProc = Bun.spawn([tar, '-xzf', tgzPath, '-C', destDir, '--strip-components=1'], {
-		stdout: 'pipe',
-		stderr: 'pipe',
-	})
-	const stderr = await new Response(extractProc.stderr).text()
-	const code = await extractProc.exited
-	if (code !== 0) return false
-	if (stderr.trim()) process.stderr.write(stderr)
-	return true
-}
-
 async function extractTemplate(tgzPath: string, destDir: string) {
-	if (await tryExtractWithSystemTar(tgzPath, destDir)) return
 	const bytes = new Uint8Array(await readFile(tgzPath))
 	await extractTarGz(bytes, destDir)
 }
@@ -690,7 +734,7 @@ async function runText(cmd: string, args: string[], cwd: string): Promise<string
 
 type SemverParts = [number, number, number]
 
-function parseSemverLikeTag(tag: string): { parts: SemverParts; strict: boolean } | null {
+export function parseSemverLikeTag(tag: string): { parts: SemverParts; strict: boolean } | null {
 	const raw = tag.trim()
 	if (!raw) return null
 	const t = raw.startsWith('v') ? raw.slice(1) : raw
@@ -710,18 +754,18 @@ function parseSemverLikeTag(tag: string): { parts: SemverParts; strict: boolean 
 	return { parts, strict }
 }
 
-function compareSemver(a: SemverParts, b: SemverParts): number {
+export function compareSemver(a: SemverParts, b: SemverParts): number {
 	for (let i = 0; i < 3; i++) {
 		if (a[i] !== b[i]) return a[i] - b[i]
 	}
 	return 0
 }
 
-function formatSemverTag(parts: SemverParts): string {
+export function formatSemverTag(parts: SemverParts): string {
 	return `v${parts[0]}.${parts[1]}.${parts[2]}`
 }
 
-function bumpSemver(current: SemverParts, kind: 'patch' | 'minor' | 'major'): SemverParts {
+export function bumpSemver(current: SemverParts, kind: 'patch' | 'minor' | 'major'): SemverParts {
 	const [maj, min, pat] = current
 	if (kind === 'patch') return [maj, min, pat + 1]
 	if (kind === 'minor') return [maj, min + 1, 0]
@@ -1350,6 +1394,135 @@ async function cmdUse(versionArg?: string) {
 	console.log(`Now using Dex ${tag} ✓`)
 }
 
+async function cmdTemplate(positional: string[], flags: Record<string, string | boolean>) {
+	const sub = positional[1]
+	const templatesDir = path.join(cacheRootDir(), 'templates')
+
+	if (!sub || sub === 'list' || sub === 'ls') {
+		console.log('Official templates:\n  - spa\n  - mpa\n')
+		console.log(`Locally cached templates (${templatesDir}):\n`)
+		if (existsSync(templatesDir)) {
+			const repos = await readdir(templatesDir, { withFileTypes: true })
+			for (const repoEnt of repos) {
+				if (!repoEnt.isDirectory()) continue
+				const repoName = repoEnt.name.replace(/__/g, '/')
+				const repoDir = path.join(templatesDir, repoEnt.name)
+				const tags = await readdir(repoDir, { withFileTypes: true })
+				for (const tagEnt of tags) {
+					if (!tagEnt.isDirectory()) continue
+					const tagName = tagEnt.name
+					console.log(`  - ${repoName}@${tagName}`)
+				}
+			}
+		}
+		return
+	}
+
+	if (sub === 'cache') {
+		const action = positional[2]
+		if (!action || action === 'list' || action === 'ls') {
+			console.log(`Cached template assets (${templatesDir}):\n`)
+			if (existsSync(templatesDir)) {
+				const walkCache = async (dir: string, base = ''): Promise<{ path: string; sizeKb: number }[]> => {
+					const entries = await readdir(dir, { withFileTypes: true })
+					const results: { path: string; sizeKb: number }[] = []
+					for (const e of entries) {
+						const full = path.join(dir, e.name)
+						const rel = path.join(base, e.name)
+						if (e.isDirectory()) {
+							results.push(...(await walkCache(full, rel)))
+						} else {
+							try {
+								const s = await stat(full)
+								results.push({ path: rel, sizeKb: Math.round(s.size / 1024) })
+							} catch {}
+						}
+					}
+					return results
+				}
+				const files = await walkCache(templatesDir)
+				if (files.length === 0) {
+					console.log('  (none)')
+				} else {
+					for (const f of files) {
+						console.log(`  - ${f.path} (${f.sizeKb} KB)`)
+					}
+				}
+			}
+			return
+		}
+
+		if (action === 'clean') {
+			const tagArg = positional[3]
+			const all = Boolean(flags.all)
+			const { rm } = await import('node:fs/promises')
+			if (all) {
+				if (existsSync(templatesDir)) {
+					await rm(templatesDir, { recursive: true, force: true })
+					console.log(`Removed all cached templates from ${templatesDir} ✓`)
+				} else {
+					console.log('No cache found.')
+				}
+				return
+			}
+			if (tagArg) {
+				// remove specific tag across repos or matching repo/tag
+				let removedCount = 0
+				if (existsSync(templatesDir)) {
+					const repos = await readdir(templatesDir, { withFileTypes: true })
+					for (const repoEnt of repos) {
+						if (!repoEnt.isDirectory()) continue
+						const tagDir = path.join(templatesDir, repoEnt.name, tagArg)
+						if (existsSync(tagDir)) {
+							await rm(tagDir, { recursive: true, force: true })
+							removedCount++
+							console.log(`Removed cached template ${repoEnt.name}@${tagArg} ✓`)
+						}
+					}
+				}
+				if (removedCount === 0) {
+					console.log(`No cached template found for tag ${tagArg}`)
+				}
+				return
+			}
+			// default clean: remove templates dir
+			if (existsSync(templatesDir)) {
+				await rm(templatesDir, { recursive: true, force: true })
+				console.log(`Removed cached templates from ${templatesDir} ✓`)
+			} else {
+				console.log('No cache found.')
+			}
+			return
+		}
+	}
+
+	if (sub === 'diff') {
+		const repo = repoFromEnvOrFlag(flags)
+		let tag = positional[2] || 'latest'
+		if (tag === 'latest') {
+			const latest = await getLatestReleaseTag(repo)
+			if (!latest) throw new Error(`Could not determine latest release tag for ${repo}`)
+			tag = latest
+		}
+		if (!tag.startsWith('v') && /^\d+\.\d+\.\d+/.test(tag)) {
+			tag = `v${tag}`
+		}
+		const diff = await fetchTemplateDiff(repo, tag)
+		if (!diff) throw new Error(`Diff not found for ${repo}@${tag}`)
+		console.log(JSON.stringify({
+			version: diff.version,
+			previousVersion: diff.previousVersion,
+			changedFiles: diff.changedFiles,
+			deletedFiles: diff.deletedFiles || [],
+		}, null, 2))
+		return
+	}
+
+	console.error(`Unknown template command: ${sub}`)
+	usage(1)
+}
+
+
 async function main() {
 	const argv = process.argv.slice(2)
 	const { positional, flags } = parseArgs(argv)
@@ -1362,7 +1535,7 @@ async function main() {
 	}
 
 	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help' || flags.h || flags.help) {
-		if (cmd !== 'sync' && cmd !== 'pie' && cmd !== 'api') {
+		if (cmd !== 'sync') {
 			usage(0)
 		}
 	}
@@ -1390,8 +1563,8 @@ async function main() {
 			return
 		}
 
-		if (cmd === 'sync') {
-			await cmdSync(flags)
+		if (cmd === 'template') {
+			await cmdTemplate(positional, flags)
 			return
 		}
 
@@ -1429,5 +1602,7 @@ async function main() {
 	}
 }
 
-await main()
+if (import.meta.main) {
+	await main()
+}
 
