@@ -4,7 +4,7 @@ title: "Reference"
 
 # Router API Reference
 
-Comprehensive reference for `@dex/router/client` and `@dex/router` in v0.2.6.
+Comprehensive reference for `@dex/router/client` and `@dex/router` in v0.3.0.
 
 ---
 

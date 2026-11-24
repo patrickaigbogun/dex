@@ -125,10 +125,10 @@ Page modules can export `metadata: Metadata` to configure document head tags, Op
 import type { Metadata } from '@dex/router'
 
 export const metadata: Metadata = {
-  title: 'Introducing Dex v0.2.6',
+  title: 'Introducing Dex v0.3.0',
   description: 'File-based routing, SSG prerendering, and typed APIs.',
-  ogTitle: 'Dex v0.2.6 Release',
-  ogDescription: 'Read what is new in Dex v0.2.6.',
+  ogTitle: 'Dex v0.3.0 Release',
+  ogDescription: 'Read what is new in Dex v0.3.0.',
   ogImage: 'https://example.com/images/dex-v026.png',
   ogVideo: 'https://example.com/videos/demo.mp4',
   ogType: 'article',

@@ -38,7 +38,7 @@ The installer stores versioned binaries in `~/.dex/versions/<version>/dex` and l
 Pin a specific version or custom directory:
 
 ```bash
-DEX_VERSION=v0.2.6 curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
+DEX_VERSION=v0.3.0 curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | bash
 DEX_HOME=/opt/dex curl -fsSL https://raw.githubusercontent.com/patrickaigbogun/dex/master/install.sh | sudo bash
 ```
 

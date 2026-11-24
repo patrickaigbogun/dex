@@ -6,9 +6,9 @@ title: "CLI"
 
 Command-line tools for the Dex framework, powered by a **native Go CLI** (`cli/`).
 
-## Native Go Architecture (v0.2.6)
+## Native Go Architecture (v0.3.0)
 
-In v0.2.6, the `dex` CLI is compiled from Go (`cli/cmd/dex/main.go`) with `CGO_ENABLED=0` into a standalone ~6 MB binary with <5ms startup and zero runtime dependencies:
+In v0.3.0, the `dex` CLI is compiled from Go (`cli/cmd/dex/main.go`) with `CGO_ENABLED=0` into a standalone ~6 MB binary with <5ms startup and zero runtime dependencies:
 
 - **Cross-compiled release targets**:
   - Linux: `dex-linux-x64`, `dex-linux-arm64`

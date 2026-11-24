@@ -2,7 +2,7 @@
 
 All notable changes to the Dex framework, packages, templates, and CLI are documented in this file.
 
-## [v0.2.6] - 2026-11-24
+## [v0.3.0] - 2026-11-24
 
 ### Added
 - **Native Go CLI (`cli/`)**: Standalone sub-5ms Go binary (<8 MB) implementing `scaffold`, `sync`, `template`, `pie generate`, `update`, `versions`/`list`, `use`, `build`, `start [-p]`, `tag`, and `--version [-f]` with cross-platform builds (`linux`, `darwin`, `windows`) and `SHA256SUMS` release verification.
