@@ -232,11 +232,79 @@ export function matchRoute(segments: RouteSegment[], pathname: string): Params |
 	return params
 }
 
-export function findMatchingRoute(routes: Route[], pathname: string): { route: Route; params: Params } | null {
+type RouteLookupIndex = {
+	staticMap: Map<string, Route>
+	byFirstSegment: Map<string, Route[]>
+	dynamicFirst: Route[]
+}
+
+const routeIndexCache = new WeakMap<Route[], RouteLookupIndex>()
+
+function buildRouteIndex(routes: Route[]): RouteLookupIndex {
+	const staticMap = new Map<string, Route>()
+	const byFirstSegment = new Map<string, Route[]>()
+	const dynamicFirst: Route[] = []
+
 	for (const r of routes) {
-		const params = matchRoute(r.segments, pathname)
+		const isAllStatic = r.segments.every((s) => s.kind === 'static')
+		if (isAllStatic) {
+			const norm = normalizePathname(r.path)
+			if (!staticMap.has(norm)) staticMap.set(norm, r)
+			continue
+		}
+
+		const first = r.segments[0]
+		if (first && first.kind === 'static') {
+			let bucket = byFirstSegment.get(first.value)
+			if (!bucket) {
+				bucket = []
+				byFirstSegment.set(first.value, bucket)
+			}
+			bucket.push(r)
+		} else {
+			dynamicFirst.push(r)
+		}
+	}
+
+	return { staticMap, byFirstSegment, dynamicFirst }
+}
+
+function getRouteIndex(routes: Route[]): RouteLookupIndex {
+	let idx = routeIndexCache.get(routes)
+	if (!idx) {
+		idx = buildRouteIndex(routes)
+		routeIndexCache.set(routes, idx)
+	}
+	return idx
+}
+
+export function findMatchingRoute(routes: Route[], pathname: string): { route: Route; params: Params } | null {
+	const norm = normalizePathname(pathname)
+	const idx = getRouteIndex(routes)
+
+	// Fast O(1) lookup for exact static routes
+	const exactStatic = idx.staticMap.get(norm)
+	if (exactStatic) return { route: exactStatic, params: {} }
+
+	// Bucketed lookup by first static segment
+	const parts = splitPathname(norm)
+	const firstSeg = parts[0]
+	if (firstSeg !== undefined) {
+		const bucket = idx.byFirstSegment.get(firstSeg)
+		if (bucket) {
+			for (const r of bucket) {
+				const params = matchRoute(r.segments, norm)
+				if (params) return { route: r, params }
+			}
+		}
+	}
+
+	// Fallback to routes starting with a dynamic param or catch-all segment
+	for (const r of idx.dynamicFirst) {
+		const params = matchRoute(r.segments, norm)
 		if (params) return { route: r, params }
 	}
+
 	return null
 }
 

@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-11-24T14:25:17.070Z",
+  "environment": {
+    "platform": "linux",
+    "arch": "arm64",
+    "bun": "1.4.4",
+    "cpus": 4
+  },
+  "router": {
+    "generate100Ms": 10.49,
+    "generate1000Ms": 54.82,
+    "match1000RoutesOpsPerSec": 414988,
+    "matchP50Us": 0.44,
+    "matchP99Us": 14.12
+  },
+  "ssg": {
+    "pagesRendered": 500,
+    "totalMs": 95.48,
+    "pagesPerSec": 5237,
+    "peakRssMb": 92.4
+  },
+  "bundle": {
+    "clientBuildMs": 39.19,
+    "clientJsBytes": 366979,
+    "clientJsGzipBytes": 111085,
+    "chunkCount": 10,
+    "totalAssetsBytes": 416522,
+    "totalAssetsGzipBytes": 129969
+  },
+  "server": {
+    "spaReqPerSec": 7537,
+    "spaP95Ms": 0.141,
+    "ssgReqPerSec": 11981,
+    "ssgP95Ms": 0.114,
+    "assetReqPerSec": 14976,
+    "sseClientsConnected": 100,
+    "sseBroadcastLatencyMs": 0.86,
+    "sseRssDeltaMb": 0.38
+  },
+  "watcher": {
+    "cycles": 50,
+    "pageCount": 200,
+    "avgRegenMs": 1.58,
+    "rssDeltaMb": 4.93
+  },
+  "cli": {
+    "binarySizeMb": 6.06,
+    "startupMedianMs": 2.64,
+    "pieGenerate100EndpointsMs": 4.86
+  }
+}

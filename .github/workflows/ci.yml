@@ -20,6 +20,12 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22'
+          cache: false
+
       - name: Install deps
         run: bun install
         working-directory: framework
@@ -34,6 +40,10 @@ jobs:
 
       - name: Run tests
         run: bun test
+        working-directory: framework
+
+      - name: Run benchmark regression check
+        run: bun run bench:check
         working-directory: framework
 
   go-cli:

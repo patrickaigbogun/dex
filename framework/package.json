@@ -6,6 +6,8 @@
   ],
   "scripts": {
     "test": "bun test",
+    "bench": "bun benchmarks/run.ts",
+    "bench:check": "bun benchmarks/run.ts --check",
     "changeset": "bunx changeset",
     "version": "bunx changeset version",
     "release": "bunx changeset publish",
