@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { statSync, watch, watchFile, existsSync } from 'node:fs'
 import { Elysia } from 'elysia'
+import { injectGoogleFonts, type DexFontsConfig } from './fonts'
 
 const CONFIG_FILENAMES = ['dex.config.ts', 'dex.config.js', 'dex.config.mjs', 'dex.config.cjs']
 
@@ -58,14 +59,32 @@ export function dexAssetsRoute(opts: {
 		let decoded = rawRel
 		try {
 			decoded = decodeURIComponent(rawRel)
-		} catch {}
+		} catch {
+			set.status = 400
+			return 'Bad asset path'
+		}
+		if (
+			rawRel.includes('\0') ||
+			rawRel.includes('\\') ||
+			decoded.includes('\0') ||
+			decoded.includes('\\') ||
+			decoded.split('/').includes('..')
+		) {
+			set.status = 400
+			return 'Bad asset path'
+		}
 		const normalized = path.posix.normalize('/' + decoded).slice(1)
 		if (!normalized || normalized.startsWith('..') || normalized.includes('..')) {
 			set.status = 400
 			return 'Bad asset path'
 		}
 
-		const filePath = path.join(opts.assetsDir, normalized)
+		const baseDir = path.resolve(opts.assetsDir)
+		const filePath = path.resolve(baseDir, normalized)
+		if (!filePath.startsWith(baseDir + path.sep)) {
+			set.status = 400
+			return 'Bad asset path'
+		}
 		set.headers['cache-control'] = isProd ? cacheControlProd : cacheControlDev
 		return Bun.file(filePath)
 	})
@@ -215,11 +234,168 @@ export function dexDevReloadRouter(opts?: {
 	})
 }
 
+export interface DexHeadMeta {
+	title?: string | null
+	description?: string | null
+	ogTitle?: string | null
+	ogDescription?: string | null
+	ogImage?: string | null
+	ogVideo?: string | null
+	ogType?: string | null
+	url?: string | null
+	twitterCard?: 'summary' | 'summary_large_image' | 'player' | null
+}
+
+function escapeHtmlAttr(val: string): string {
+	return val
+		.replace(/&/g, '&amp;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+}
+
+function escapeHtmlText(val: string): string {
+	return val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function isSafeMetaUrl(val: string): boolean {
+	const cleaned = val.replace(/[\u0000-\u0020\u007f]+/g, '').toLowerCase()
+	const m = /^([a-z0-9+.-]+):/.exec(cleaned)
+	if (m) {
+		return m[1] !== 'javascript' && m[1] !== 'data' && m[1] !== 'vbscript'
+	}
+	return true
+}
+
 /**
- * SPA fallback that serves the index HTML for non-asset GET requests.
+ * Inject head title, description, Open Graph, and Twitter metadata into HTML before </head>.
  */
-export function dexSpaFallback(opts: { indexHtmlPath: string }) {
-	return new Elysia().get('*', ({ request, set }) => {
+export function injectHeadMeta(html: string, meta: DexHeadMeta): string {
+	let out = html
+	const title = meta.title || meta.ogTitle
+	if (title) {
+		const escapedTitle = escapeHtmlText(title)
+		if (/<title>[\s\S]*?<\/title>/i.test(out)) {
+			out = out.replace(/<title>[\s\S]*?<\/title>/i, () => `<title>${escapedTitle}</title>`)
+		} else {
+			out = out.replace(/<\/head>/i, () => `<title>${escapedTitle}</title>\n\t</head>`)
+		}
+	}
+
+	const tags: string[] = []
+	const desc = meta.description || meta.ogDescription
+	if (desc) {
+		tags.push(`<meta name="description" content="${escapeHtmlAttr(desc)}" />`)
+		tags.push(`<meta property="og:description" content="${escapeHtmlAttr(desc)}" />`)
+		tags.push(`<meta name="twitter:description" content="${escapeHtmlAttr(desc)}" />`)
+	}
+	const ogTitle = meta.ogTitle || meta.title
+	if (ogTitle) {
+		tags.push(`<meta property="og:title" content="${escapeHtmlAttr(ogTitle)}" />`)
+		tags.push(`<meta name="twitter:title" content="${escapeHtmlAttr(ogTitle)}" />`)
+	}
+	if (meta.ogType) {
+		tags.push(`<meta property="og:type" content="${escapeHtmlAttr(meta.ogType)}" />`)
+	}
+	if (meta.url && isSafeMetaUrl(meta.url)) {
+		tags.push(`<meta property="og:url" content="${escapeHtmlAttr(meta.url)}" />`)
+	}
+	const safeOgImage = meta.ogImage && isSafeMetaUrl(meta.ogImage) ? meta.ogImage : null
+	if (safeOgImage) {
+		tags.push(`<meta property="og:image" content="${escapeHtmlAttr(safeOgImage)}" />`)
+		tags.push(`<meta name="twitter:image" content="${escapeHtmlAttr(safeOgImage)}" />`)
+	}
+	if (meta.ogVideo && isSafeMetaUrl(meta.ogVideo)) {
+		tags.push(`<meta property="og:video" content="${escapeHtmlAttr(meta.ogVideo)}" />`)
+		tags.push(`<meta property="og:video:secure_url" content="${escapeHtmlAttr(meta.ogVideo)}" />`)
+		tags.push(`<meta property="og:video:type" content="video/mp4" />`)
+	}
+	const twitterCard = meta.twitterCard || (safeOgImage ? 'summary_large_image' : 'summary')
+	tags.push(`<meta name="twitter:card" content="${escapeHtmlAttr(twitterCard)}" />`)
+
+	if (tags.length > 0) {
+		out = out.replace(/<\/head>/i, () => `\t\t${tags.join('\n\t\t')}\n\t</head>`)
+	}
+	return out
+}
+
+function resolveSsgHtmlPath(
+	pathname: string,
+	indexHtmlPath: string,
+	ssgDir?: string
+): { targetPath: string; invalid: boolean } {
+	if (pathname.includes('\0') || pathname.includes('\\')) {
+		return { targetPath: indexHtmlPath, invalid: true }
+	}
+	let decoded = pathname
+	try {
+		decoded = decodeURIComponent(pathname)
+	} catch {
+		return { targetPath: indexHtmlPath, invalid: true }
+	}
+	if (decoded.includes('\0') || decoded.includes('\\')) {
+		return { targetPath: indexHtmlPath, invalid: true }
+	}
+
+	const rawSegments = decoded.split(/[\\/]/).filter(Boolean)
+	if (rawSegments.some((seg) => seg === '.' || seg === '..')) {
+		return { targetPath: indexHtmlPath, invalid: true }
+	}
+
+	const normalized = path.posix.normalize('/' + decoded)
+	const relPath = normalized.replace(/^\/+|\/+$/g, '')
+
+	if (relPath) {
+		const baseDirs: string[] = []
+		if (ssgDir) {
+			baseDirs.push(ssgDir)
+		}
+		baseDirs.push(path.dirname(indexHtmlPath))
+
+		for (const baseDir of baseDirs) {
+			const resolvedBase = path.resolve(baseDir)
+			const candidate = path.resolve(resolvedBase, relPath, 'index.html')
+			if (!candidate.startsWith(resolvedBase + path.sep)) {
+				return { targetPath: indexHtmlPath, invalid: true }
+			}
+			if (existsSync(candidate)) {
+				return { targetPath: candidate, invalid: false }
+			}
+		}
+	} else if (ssgDir) {
+		const resolvedSsg = path.resolve(ssgDir)
+		const rootSsg = path.resolve(resolvedSsg, 'index.html')
+		if (rootSsg.startsWith(resolvedSsg + path.sep) && existsSync(rootSsg)) {
+			return { targetPath: rootSsg, invalid: false }
+		}
+	}
+
+	return { targetPath: indexHtmlPath, invalid: false }
+}
+
+/**
+ * SPA fallback that serves prerendered SSG pages or the index HTML for non-asset GET requests.
+ */
+export function dexSpaFallback(opts: {
+	indexHtmlPath: string
+	ssgDir?: string
+	subdomains?: Record<string, string>
+	fonts?: DexFontsConfig
+	trustProxy?: boolean
+	allowedHosts?: string[]
+	resolveHead?: (ctx: {
+		pathname: string
+		url: URL
+		hostname: string
+		request: Request
+	}) => Promise<DexHeadMeta | null> | DexHeadMeta | null
+}) {
+	const subdomains: Record<string, string> = opts.subdomains ?? (dexConfig as any)?.subdomains ?? {}
+	const fonts: DexFontsConfig | undefined = opts.fonts ?? (dexConfig as any)?.fonts
+	const allowedHostsLower = opts.allowedHosts?.map((h) => h.toLowerCase())
+
+	return new Elysia().get('*', async ({ request, set }) => {
 		if (request.method !== 'GET') {
 			set.status = 405
 			return 'Method Not Allowed'
@@ -229,9 +405,33 @@ export function dexSpaFallback(opts: { indexHtmlPath: string }) {
 		if (
 			url.pathname.startsWith('/api/') ||
 			url.pathname.startsWith('/assets/') ||
-			url.pathname.startsWith('/__dev/') ||
-			url.pathname.includes('.')
+			url.pathname.startsWith('/__dev/')
 		) {
+			set.status = 404
+			return 'Not Found'
+		}
+
+		const rawSegs = url.pathname.split('/').filter(Boolean)
+		let hasTraversal = url.pathname.includes('\0') || url.pathname.includes('\\')
+		let lastDecodedSeg = ''
+		for (const seg of rawSegs) {
+			try {
+				const dec = decodeURIComponent(seg)
+				if (dec === '.' || dec === '..' || dec.includes('\\') || dec.includes('\0') || dec.includes('/')) {
+					hasTraversal = true
+					break
+				}
+				lastDecodedSeg = dec
+			} catch {
+				hasTraversal = true
+				break
+			}
+		}
+		if (hasTraversal) {
+			set.status = 400
+			return 'Bad Path'
+		}
+		if (/\.[a-zA-Z0-9]{1,10}$/.test(lastDecodedSeg)) {
 			set.status = 404
 			return 'Not Found'
 		}
@@ -242,7 +442,96 @@ export function dexSpaFallback(opts: { indexHtmlPath: string }) {
 			return 'Not Found'
 		}
 
-		return Bun.file(opts.indexHtmlPath)
+		const rawProto = opts.trustProxy === true
+			? (request.headers.get('x-forwarded-proto') || url.protocol).split(',')[0]!.trim().replace(/:$/, '').toLowerCase()
+			: url.protocol.replace(/:$/, '').toLowerCase()
+		const proto = rawProto === 'http' || rawProto === 'https' ? rawProto : 'https'
+
+		const rawHostHeader = opts.trustProxy === true
+			? (request.headers.get('x-forwarded-host') || request.headers.get('host') || url.host || '')
+			: (request.headers.get('host') || url.host || '')
+		const hostCandidate = rawHostHeader.split(',')[0]!.trim().toLowerCase()
+		const isValidHostHeader =
+			hostCandidate.length > 0 &&
+			/^[a-z0-9.:\-[\]]+$/.test(hostCandidate) &&
+			!hostCandidate.includes('@') &&
+			!hostCandidate.includes('/')
+		const hostHeader = isValidHostHeader ? hostCandidate : url.host.toLowerCase()
+
+		let hostname = url.hostname.toLowerCase()
+		if (isValidHostHeader) {
+			try {
+				hostname = new URL(`${proto}://${hostHeader}`).hostname.toLowerCase()
+			} catch {
+				hostname = url.hostname.toLowerCase()
+			}
+		}
+
+		if (allowedHostsLower && allowedHostsLower.length > 0 && !allowedHostsLower.includes(hostname)) {
+			set.status = 403
+			return 'Forbidden'
+		}
+
+		const isLocal =
+			hostname === 'localhost' ||
+			hostname === '[::1]' ||
+			hostname === '::1' ||
+			/^(\d+\.){3}\d+$/.test(hostname) ||
+			hostname.includes(':')
+
+		if (!isLocal && hostname) {
+			for (const [sub, prefix] of Object.entries(subdomains)) {
+				const normPrefix = prefix.endsWith('/') && prefix !== '/' ? prefix.slice(0, -1) : prefix
+				const isOnSub = hostname.startsWith(`${sub}.`)
+				const matchesPrefix = url.pathname === normPrefix || url.pathname.startsWith(normPrefix + '/')
+
+				if (matchesPrefix) {
+					const strippedPath = url.pathname === normPrefix ? '/' : (url.pathname.slice(normPrefix.length) || '/')
+					if (isOnSub) {
+						return Response.redirect(`${proto}://${hostHeader}${strippedPath}${url.search}`, 308)
+					} else if (!hostname.endsWith('.localhost')) {
+						const baseHost = hostHeader.replace(/^www\./i, '')
+						return Response.redirect(`${proto}://${sub}.${baseHost}${strippedPath}${url.search}`, 308)
+					}
+				}
+			}
+		}
+
+		const { targetPath, invalid } = resolveSsgHtmlPath(url.pathname, opts.indexHtmlPath, opts.ssgDir)
+		if (invalid) {
+			set.status = 400
+			return 'Bad Path'
+		}
+
+		let meta: DexHeadMeta | null = null
+		if (opts.resolveHead) {
+			try {
+				meta = await opts.resolveHead({
+					pathname: url.pathname,
+					url,
+					hostname,
+					request,
+				})
+			} catch (err) {
+				console.warn('dexSpaFallback resolveHead failed:', err)
+			}
+		}
+
+		const hasFonts = Boolean(fonts && Object.keys(fonts).length > 0)
+		if (meta || hasFonts) {
+			let html = await Bun.file(targetPath).text()
+			if (meta) {
+				html = injectHeadMeta(html, meta)
+			}
+			if (hasFonts) {
+				html = injectGoogleFonts(html, fonts)
+			}
+			return new Response(html, {
+				headers: { 'content-type': 'text/html; charset=utf-8' },
+			})
+		}
+
+		return Bun.file(targetPath)
 	})
 }
 
@@ -314,4 +603,5 @@ export function dexPrettyLogger(opts?: {
 
 export * from './env'
 export * from './port'
+export * from './fonts'
 

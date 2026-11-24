@@ -5,6 +5,8 @@ export type DexConfig = {
 	mode?: string
 	port?: number
 	renderStrategy?: 'spa' | 'ssg' | 'ssr' | 'ppr' | 'dynamic'
+	subdomains?: Record<string, string>
+	fonts?: Record<string, any>
 
 	// Router generation paths (current naming)
 	pagesDir?: string

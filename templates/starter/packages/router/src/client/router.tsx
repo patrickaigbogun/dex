@@ -26,22 +26,135 @@ import type {
 const pageModuleCache = new Map<string, PageModule | Promise<PageModule>>()
 const layoutModuleCache = new Map<string, LayoutModule | Promise<LayoutModule>>()
 
-type RouterState = RouteContext & {
+export type RouterState = RouteContext & {
 	navigate: (to: string, options?: NavigateOptions) => void
 	prefetch: (to: string) => Promise<void>
+	resolveHref: (to: string) => string
 }
 
-const RouterContext = createContext<RouterState | null>(null)
+const DEFAULT_SUBDOMAINS: Record<string, string> = {}
+
+function isLocalOrIpHost(hostname: string): boolean {
+	return (
+		hostname === 'localhost' ||
+		/^(\d+\.){3}\d+$/.test(hostname) ||
+		hostname.includes(':')
+	)
+}
+
+export function resolveSubdomainMount(subdomains: Record<string, string> = DEFAULT_SUBDOMAINS): string | null {
+	if (typeof window === 'undefined') return null
+	const hostname = window.location.hostname.toLowerCase()
+	if (isLocalOrIpHost(hostname)) return null
+	const parts = hostname.split('.')
+	if (parts.length < 2) return null
+	const sub = parts[0]
+	if (!sub) return null
+	const mount = subdomains[sub]
+	return mount ? normalizePathname(mount) : null
+}
+
+export function toInternalPathname(browserPathname: string, mountPrefix: string | null): string {
+	const norm = normalizePathname(browserPathname)
+	if (!mountPrefix) return norm
+	if (norm === '/') return mountPrefix
+	if (norm === mountPrefix || norm.startsWith(mountPrefix + '/')) return norm
+	return `${mountPrefix}${norm}`
+}
+
+export function toExternalPathname(pathname: string, mountPrefix: string | null): string {
+	const norm = normalizePathname(pathname)
+	let res = norm
+	if (mountPrefix) {
+		if (norm === mountPrefix) {
+			res = '/'
+		} else if (norm.startsWith(mountPrefix + '/')) {
+			res = norm.slice(mountPrefix.length) || '/'
+		}
+	}
+	return res.replace(/^\/+/, '/')
+}
+
+export function toExternalHref(to?: string, mountPrefix: string | null = null): string {
+	if (!to || typeof to !== 'string') return (to as any) || ''
+	if (!mountPrefix || typeof window === 'undefined') return to
+	try {
+		const url = new URL(to, window.location.origin)
+		if (url.origin !== window.location.origin) return to
+		const extPath = toExternalPathname(url.pathname, mountPrefix)
+		return `${extPath}${url.search}${url.hash}`
+	} catch {
+		return to
+	}
+}
+
+export function resolveMainDomainSubdomainRedirect(
+	pathname: string,
+	search: string,
+	hash: string,
+	subdomains: Record<string, string> = DEFAULT_SUBDOMAINS
+): string | null {
+	if (typeof window === 'undefined') return null
+	const hostname = window.location.hostname.toLowerCase()
+	if (isLocalOrIpHost(hostname) || hostname.endsWith('.localhost')) return null
+	const norm = normalizePathname(pathname)
+	for (const [sub, prefix] of Object.entries(subdomains)) {
+		const normPrefix = normalizePathname(prefix)
+		if (!hostname.startsWith(`${sub}.`) && (norm === normPrefix || norm.startsWith(normPrefix + '/'))) {
+			const baseHost = hostname.replace(/^www\./i, '')
+			const extPath = toExternalPathname(norm, normPrefix)
+			const portPart = window.location.port ? `:${window.location.port}` : ''
+			return `${window.location.protocol}//${sub}.${baseHost}${portPart}${extPath}${search}${hash}`
+		}
+	}
+	return null
+}
+
+export const RouterContext = createContext<RouterState | null>(null)
 const OutletContext = createContext<any>(null)
 
-function hasUnsafeScheme(to: string) {
-	const s = to.trim().toLowerCase()
-	const m = /^([a-z0-9+.-]+):/.exec(s)
-	if (!m) return false
-	return m[1] === 'javascript' || m[1] === 'data' || m[1] === 'vbscript'
+/**
+ * Create a static RouterState for SSG/SSR prerendering so router hooks and <Link> work without a browser.
+ */
+export function createStaticRouterState(pathname: string, params: Params = {}): RouterState {
+	let normPathname = normalizePathname(pathname || '/')
+	let search = ''
+	let hash = ''
+	try {
+		const url = new URL(pathname || '/', 'http://localhost')
+		normPathname = normalizePathname(url.pathname)
+		search = url.search ?? ''
+		hash = url.hash ?? ''
+	} catch {
+		// keep normalized pathname
+	}
+
+	return {
+		pathname: normPathname,
+		search,
+		hash,
+		params,
+		query: new URLSearchParams(search),
+		isNavigating: false,
+		navigate: () => {},
+		prefetch: async () => {},
+		resolveHref: (to: string) => to,
+	}
 }
 
-function isExternalTo(to: string) {
+const ALLOWED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel'])
+
+export function hasUnsafeScheme(to?: string) {
+	if (!to || typeof to !== 'string') return false
+	const s = to.replace(/[\u0000-\u0020\u007f]+/g, '').toLowerCase()
+	if (s.startsWith('//') || s.startsWith('/\\')) return true
+	const m = /^([a-z0-9+.-]+):/.exec(s)
+	if (!m) return false
+	return !ALLOWED_SCHEMES.has(m[1]!)
+}
+
+function isExternalTo(to?: string) {
+	if (!to || typeof to !== 'string' || typeof window === 'undefined') return false
 	try {
 		const url = new URL(to, window.location.origin)
 		if (url.protocol !== 'http:' && url.protocol !== 'https:') return true
@@ -58,7 +171,7 @@ function isDataSaverEnabled(): boolean {
 }
 
 function normalizeRelForTargetBlank(rel: string | undefined, target: string | undefined) {
-	if (target !== '_blank') return rel
+	if (target?.toLowerCase() !== '_blank') return rel
 	const tokens = new Set(
 		(rel ?? '')
 			.split(/\s+/g)
@@ -165,10 +278,16 @@ async function loadPageModule(route: Route): Promise<any> {
 	const cached = pageModuleCache.get(route.file)
 	if (cached) return cached
 
-	const promise = route.importPage().then((mod) => {
-		pageModuleCache.set(route.file, mod)
-		return mod
-	})
+	const promise = route
+		.importPage()
+		.then((mod) => {
+			pageModuleCache.set(route.file, mod)
+			return mod
+		})
+		.catch((err) => {
+			pageModuleCache.delete(route.file)
+			throw err
+		})
 	pageModuleCache.set(route.file, promise)
 	return promise
 }
@@ -183,10 +302,15 @@ async function loadLayoutModule(
 	if (!layoutsMap || !layoutsMap[name]) return undefined
 
 	const loader = layoutsMap[name]!
-	const promise = loader().then((mod) => {
-		layoutModuleCache.set(name, mod)
-		return mod
-	})
+	const promise = loader()
+		.then((mod) => {
+			layoutModuleCache.set(name, mod)
+			return mod
+		})
+		.catch((err) => {
+			layoutModuleCache.delete(name)
+			throw err
+		})
 	layoutModuleCache.set(name, promise)
 	return promise
 }
@@ -273,7 +397,8 @@ export function useOutletContext<T = any>(): T {
 }
 
 export type LinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
-	to: string
+	to?: string
+	href?: string
 	replace?: boolean
 	prefetch?: PrefetchStrategy
 }
@@ -283,12 +408,30 @@ export type LinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
  */
 export function Link(props: LinkProps) {
 	const ctx = useContext(RouterContext)
-	const { to, replace, prefetch = 'intent', onClick, onMouseEnter, onMouseLeave, onFocus, target, rel, ...rest } = props
+	const {
+		to: rawTo,
+		href: rawHref,
+		replace,
+		prefetch = 'intent',
+		onClick,
+		onMouseEnter,
+		onMouseLeave,
+		onFocus,
+		target,
+		rel,
+		...rest
+	} = props
+	const to = rawTo ?? rawHref
+
+	if (to === undefined || to === null || typeof to !== 'string') {
+		throw new Error('[dex-router] <Link> requires a valid "to" or "href" destination prop.')
+	}
 
 	const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const unsafe = hasUnsafeScheme(to)
-	const href = unsafe ? '#' : to
+	const resolvedTo = !unsafe && ctx ? ctx.resolveHref(to) : to
+	const href = unsafe ? '#' : resolvedTo
 	const finalRel = normalizeRelForTargetBlank(rel, target)
 
 	const shouldPrefetch = prefetch !== 'none' && prefetch !== false && !isDataSaverEnabled()
@@ -398,6 +541,75 @@ type LoadedRouteView = {
 	Layout?: React.ComponentType<{ children: React.ReactNode }>
 }
 
+export type RouterErrorBoundaryProps = {
+	children: React.ReactNode
+	fallback?: React.ComponentType<{ error: unknown; reset: () => void }>
+	resetKey?: string
+}
+
+type RouterErrorBoundaryState = {
+	hasError: boolean
+	error: unknown
+	prevResetKey?: string
+}
+
+/**
+ * Error boundary wrapping rendered router views and layouts.
+ */
+export class RouterErrorBoundary extends React.Component<RouterErrorBoundaryProps, RouterErrorBoundaryState> {
+	constructor(props: RouterErrorBoundaryProps) {
+		super(props)
+		this.state = { hasError: false, error: null, prevResetKey: props.resetKey }
+	}
+
+	static getDerivedStateFromError(error: unknown): Partial<RouterErrorBoundaryState> {
+		return { hasError: true, error }
+	}
+
+	static getDerivedStateFromProps(
+		props: RouterErrorBoundaryProps,
+		state: RouterErrorBoundaryState
+	): Partial<RouterErrorBoundaryState> | null {
+		if (props.resetKey !== state.prevResetKey) {
+			return { hasError: false, error: null, prevResetKey: props.resetKey }
+		}
+		return null
+	}
+
+	componentDidCatch(error: unknown, errorInfo: React.ErrorInfo) {
+		console.error('[dex-router] uncaught render error:', error, errorInfo)
+	}
+
+	reset = () => {
+		this.setState({ hasError: false, error: null })
+	}
+
+	render() {
+		if (this.state.hasError) {
+			if (this.props.fallback) {
+				return React.createElement(this.props.fallback, {
+					error: this.state.error,
+					reset: this.reset,
+				})
+			}
+			const message =
+				this.state.error instanceof Error
+					? this.state.error.message
+					: String(this.state.error ?? 'Unexpected application error')
+			return (
+				<div role="alert" style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif' }}>
+					<h2>Something went wrong</h2>
+					<p>{message}</p>
+					<button type="button" onClick={this.reset}>
+						Try again
+					</button>
+				</div>
+			)
+		}
+		return this.props.children
+	}
+}
+
 /**
  * Props for the file-based router runtime.
  */
@@ -408,14 +620,22 @@ export type FileRouterProps = {
 	notFound?: React.ReactNode
 	loading?: React.ReactNode
 	error?: React.ComponentType<{ error: unknown }>
+	errorBoundary?: React.ComponentType<{ error: unknown; reset: () => void }>
+	subdomains?: Record<string, string>
 }
 
 /**
  * File-based router that renders pages and layouts with zero-flicker concurrent transitions.
  */
 export function FileRouter(props: FileRouterProps) {
+	const subdomains = props.subdomains ?? DEFAULT_SUBDOMAINS
+	const mountPrefix = useMemo(() => resolveSubdomainMount(subdomains), [subdomains])
+
 	const [loc, setLoc] = useState(() => ({
-		pathname: typeof window !== 'undefined' ? normalizePathname(window.location.pathname) : '/',
+		pathname:
+			typeof window !== 'undefined'
+				? toInternalPathname(window.location.pathname, mountPrefix)
+				: '/',
 		search: typeof window !== 'undefined' ? (window.location.search ?? '') : '',
 		hash: typeof window !== 'undefined' ? (window.location.hash ?? '') : '',
 	}))
@@ -428,30 +648,84 @@ export function FileRouter(props: FileRouterProps) {
 
 	useEffect(() => {
 		if (typeof window === 'undefined') return
+
+		// If visiting main domain at a subdomain prefix, redirect to <sub.domain>/*
+		const redirectUrl = resolveMainDomainSubdomainRedirect(
+			window.location.pathname,
+			window.location.search ?? '',
+			window.location.hash ?? '',
+			subdomains
+		)
+		if (redirectUrl) {
+			window.location.replace(redirectUrl)
+			return
+		}
+
+		// If on subdomain and URL bar has the mount prefix, normalize URL bar to /*
+		if (mountPrefix) {
+			const rawNorm = normalizePathname(window.location.pathname)
+			if (rawNorm === mountPrefix || rawNorm.startsWith(mountPrefix + '/')) {
+				const cleanExt = toExternalPathname(rawNorm, mountPrefix)
+				window.history.replaceState({}, '', `${cleanExt}${window.location.search ?? ''}${window.location.hash ?? ''}`)
+			}
+		}
+
 		const onPop = () => {
 			setLoc({
-				pathname: normalizePathname(window.location.pathname),
+				pathname: toInternalPathname(window.location.pathname, mountPrefix),
 				search: window.location.search ?? '',
 				hash: window.location.hash ?? '',
 			})
 		}
 		window.addEventListener('popstate', onPop)
 		return () => window.removeEventListener('popstate', onPop)
-	}, [])
+	}, [mountPrefix, subdomains])
+
+	const resolveHref = (to: string): string => {
+		return toExternalHref(to, mountPrefix)
+	}
 
 	const navigate = (to: string, options?: NavigateOptions) => {
 		if (typeof window === 'undefined') return
-		const url = new URL(to, window.location.origin)
-		const nextPath = normalizePathname(url.pathname)
+		if (hasUnsafeScheme(to)) return
+
+		let url: URL
+		try {
+			url = new URL(to, window.location.origin)
+		} catch {
+			return
+		}
+
+		if (url.origin !== window.location.origin) {
+			if (url.protocol === 'http:' || url.protocol === 'https:') {
+				window.location.assign(url.href)
+			}
+			return
+		}
+
+		const redirectUrl = resolveMainDomainSubdomainRedirect(
+			url.pathname,
+			url.search ?? '',
+			url.hash ?? '',
+			subdomains
+		)
+		if (redirectUrl) {
+			window.location.assign(redirectUrl)
+			return
+		}
+
+		const internalPath = toInternalPathname(url.pathname, mountPrefix)
+		const externalPath = toExternalPathname(internalPath, mountPrefix)
+		const externalUrl = `${externalPath}${url.search ?? ''}${url.hash ?? ''}`
 
 		if (options?.replace) {
-			window.history.replaceState({}, '', url.href)
+			window.history.replaceState({}, '', externalUrl)
 		} else {
-			window.history.pushState({}, '', url.href)
+			window.history.pushState({}, '', externalUrl)
 		}
 
 		setLoc({
-			pathname: nextPath,
+			pathname: internalPath,
 			search: url.search ?? '',
 			hash: url.hash ?? '',
 		})
@@ -460,7 +734,7 @@ export function FileRouter(props: FileRouterProps) {
 	const prefetch = async (to: string): Promise<void> => {
 		try {
 			const url = new URL(to, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
-			const targetPath = normalizePathname(url.pathname)
+			const targetPath = toInternalPathname(url.pathname, mountPrefix)
 			const match = findMatchingRoute(props.routes, targetPath)
 			if (!match) return
 
@@ -544,23 +818,18 @@ export function FileRouter(props: FileRouterProps) {
 			isNavigating: isPending || isRouteLoading,
 			navigate,
 			prefetch,
+			resolveHref,
 		}),
-		[loc.pathname, loc.search, loc.hash, match?.params, isPending, isRouteLoading]
+		[loc.pathname, loc.search, loc.hash, match?.params, isPending, isRouteLoading, mountPrefix]
 	)
-
-	if (!match) {
-		return (
-			<RouterContext.Provider value={ctxValue}>
-				{props.GlobalLayout ? <props.GlobalLayout>{props.notFound ?? <div>404</div>}</props.GlobalLayout> : (props.notFound ?? <div>404</div>)}
-			</RouterContext.Provider>
-		)
-	}
 
 	const GlobalLayout = props.GlobalLayout
 
 	let body: React.ReactNode
 
-	if (loadError) {
+	if (!match) {
+		body = props.notFound ?? <div>404</div>
+	} else if (loadError) {
 		body = props.error ? React.createElement(props.error, { error: loadError }) : <div>Failed to load route</div>
 	} else if (!loadedView) {
 		// Initial mount only: render loading placeholder if first route has not loaded yet
@@ -573,8 +842,9 @@ export function FileRouter(props: FileRouterProps) {
 
 	return (
 		<RouterContext.Provider value={ctxValue}>
-			{GlobalLayout ? <GlobalLayout>{body}</GlobalLayout> : body}
+			<RouterErrorBoundary fallback={props.errorBoundary} resetKey={loc.pathname}>
+				{GlobalLayout ? <GlobalLayout>{body}</GlobalLayout> : body}
+			</RouterErrorBoundary>
 		</RouterContext.Provider>
 	)
 }
-

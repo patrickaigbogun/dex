@@ -112,6 +112,7 @@ async function walk(dirAbs: string): Promise<string[]> {
 	const out: string[] = []
 	const entries = await readdir(dirAbs, { withFileTypes: true })
 	for (const e of entries) {
+		if (e.isSymbolicLink()) continue
 		const abs = path.join(dirAbs, e.name)
 		if (e.isDirectory()) {
 			out.push(...(await walk(abs)))
