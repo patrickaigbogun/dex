@@ -19,18 +19,21 @@ type ParsedArgs struct {
 }
 
 var knownBoolFlags = map[string]bool{
-	"--no-install":  true,
-	"--no-cache":    true,
-	"--fresh":       true,
-	"--all":         true,
-	"--force":       true,
-	"--interactive": true,
-	"-v":            true,
-	"--version":     true,
-	"-f":            true,
-	"-p":            true,
-	"-h":            true,
-	"--help":        true,
+	"--no-install":       true,
+	"--no-cache":         true,
+	"--fresh":            true,
+	"--all":              true,
+	"--force":            true,
+	"--interactive":      true,
+	"--dry-run":          true,
+	"--prod":             true,
+	"--include-template": true,
+	"-v":                 true,
+	"--version":          true,
+	"-f":                 true,
+	"-p":                 true,
+	"-h":                 true,
+	"--help":             true,
 }
 
 func stripLeadingHyphens(flag string) string {

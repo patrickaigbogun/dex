@@ -4,11 +4,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -241,7 +244,7 @@ func TestCmdSync_ChecksumMismatch(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWD) })
 
-	err = CmdSync(core.ParseArgs([]string{"sync", "--repo", repo, "--tag", targetTag}))
+	err = CmdSync(core.ParseArgs([]string{"sync", "--include-template", "--repo", repo, "--tag", targetTag}))
 	if err == nil || !strings.Contains(err.Error(), "checksum verification failed") {
 		t.Fatalf("expected checksum verification failure error, got %v", err)
 	}
@@ -254,5 +257,197 @@ func TestCmdSync_ChecksumMismatch(t *testing.T) {
 func TestCmdTemplateCacheClean_RejectsInvalidTag(t *testing.T) {
 	if err := CmdTemplate([]string{"template", "cache", "clean", "../../etc"}, core.ParseArgs(nil)); err == nil {
 		t.Fatalf("expected error for invalid tag in cache clean")
+	}
+}
+
+func TestResolveEnabledPackages(t *testing.T) {
+	t.Run("legacy project without split files returns DefaultPackages", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "dex.config.ts"), []byte("export default {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := core.ResolveEnabledPackages(dir)
+		if !reflect.DeepEqual(got, core.DefaultPackages) {
+			t.Fatalf("ResolveEnabledPackages = %v, want %v", got, core.DefaultPackages)
+		}
+	})
+
+	t.Run("split config files resolve enabled packages plus core", func(t *testing.T) {
+		dir := t.TempDir()
+		coreDir := filepath.Join(dir, "config", "core")
+		if err := os.MkdirAll(coreDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"index.ts", "router.ts", "server.js", "api.json", "validation.ts"} {
+			if err := os.WriteFile(filepath.Join(coreDir, f), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got := core.ResolveEnabledPackages(dir)
+		want := []string{"core", "router", "server", "pie", "validation"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("ResolveEnabledPackages = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestCmdInstall_ReconcilesWithoutOverwritingUserFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheDir := filepath.Join(tmpDir, "cache")
+	t.Setenv("DEX_CACHE_DIR", cacheDir)
+
+	projectDir := filepath.Join(tmpDir, "app")
+	coreConfigDir := filepath.Join(projectDir, "config", "core")
+	if err := os.MkdirAll(coreConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"index.ts", "router.ts", "server.ts", "api.ts"} {
+		if err := os.WriteFile(filepath.Join(coreConfigDir, f), []byte("export default {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "package.json"), []byte(`{"name":"my-dex-app","dependencies":{"react":"^19.0.0"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create web/pages/index.tsx with custom content to verify it is NEVER overwritten.
+	existingPagePath := filepath.Join(projectDir, "web", "pages", "index.tsx")
+	if err := os.MkdirAll(filepath.Dir(existingPagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	customPage := "export default function CustomHome() { return <div>Keep Me</div> }\n"
+	if err := os.WriteFile(existingPagePath, []byte(customPage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := "testowner/dex"
+	tag := "v0.4.0"
+	pkgs := []string{"core", "router", "server", "pie"}
+	sums := make(map[string]string)
+	for _, pkg := range pkgs {
+		asset := "dex-package-" + pkg + ".tgz"
+		dest := core.CachePathForTemplate(repo, tag, asset)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		tgz := createTestTgz(t, "pkg-"+pkg, map[string]string{
+			"package.json": `{"name":"@dex/` + pkg + `","version":"0.4.0"}`,
+			"src/index.ts": "export const pkg = '" + pkg + "'\n",
+		})
+		if err := os.WriteFile(dest, tgz, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(tgz)
+		sums[asset] = hex.EncodeToString(sum[:])
+	}
+
+	origSums := fetchReleaseSHA256Sums
+	t.Cleanup(func() { fetchReleaseSHA256Sums = origSums })
+	fetchReleaseSHA256Sums = func(r, tg string) (map[string]string, error) {
+		return sums, nil
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	args := core.ParseArgs([]string{"install", "--repo", repo, "--tag", tag, "--no-install"})
+	if err := CmdInstall(args); err != nil {
+		t.Fatalf("CmdInstall failed: %v", err)
+	}
+
+	// Verify existing web/pages/index.tsx was NOT overwritten
+	gotPage, err := os.ReadFile(existingPagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotPage) != customPage {
+		t.Fatalf("web/pages/index.tsx was overwritten! got %q, want %q", string(gotPage), customPage)
+	}
+
+	// Verify missing starter files for server and pie WERE created
+	if !fileExists(filepath.Join(projectDir, "routes", "api", "index.ts")) {
+		t.Fatalf("expected routes/api/index.ts to be scaffolded")
+	}
+	if !fileExists(filepath.Join(projectDir, "lib", "api.ts")) {
+		t.Fatalf("expected lib/api.ts to be scaffolded")
+	}
+
+	// Verify packages/index.ts and package.json dependencies + packageVersions
+	idxRaw, err := os.ReadFile(filepath.Join(projectDir, "packages", "index.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(idxRaw), "export * from './core/src/index'") || strings.Contains(string(idxRaw), "./dev/") {
+		t.Fatalf("unexpected packages/index.ts: %s", string(idxRaw))
+	}
+
+	pkgRaw, err := os.ReadFile(filepath.Join(projectDir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkgData map[string]any
+	if err := json.Unmarshal(pkgRaw, &pkgData); err != nil {
+		t.Fatal(err)
+	}
+	deps := pkgData["dependencies"].(map[string]any)
+	if deps["@dex/core"] != "workspace:*" || deps["@dex/router"] != "workspace:*" || deps["react"] != "^19.0.0" {
+		t.Fatalf("unexpected dependencies: %v", deps)
+	}
+	dexField := pkgData["dex"].(map[string]any)
+	pkgVersions := dexField["packageVersions"].(map[string]any)
+	if pkgVersions["@dex/core"] != "0.4.0" || pkgVersions["@dex/pie"] != "0.4.0" {
+		t.Fatalf("unexpected packageVersions: %v", pkgVersions)
+	}
+}
+
+func TestCmdSync_DryRunDoesNotModifyDisk(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "app")
+	coreConfigDir := filepath.Join(projectDir, "config", "core")
+	if err := os.MkdirAll(coreConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coreConfigDir, "index.ts"), []byte("export default {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coreConfigDir, "router.ts"), []byte("export default {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "packages", "core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "packages", "core", "package.json"), []byte(`{"name":"@dex/core","version":"0.3.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := core.WriteDexMetadata(projectDir, "v0.3.0", "v0.3.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	if err := CmdSync(core.ParseArgs([]string{"sync", "--dry-run", "--repo", "testowner/dex", "--tag", "v0.4.0"})); err != nil {
+		t.Fatalf("CmdSync --dry-run failed: %v", err)
+	}
+
+	// Verify metadata was NOT updated and packages/router was NOT created
+	meta, err := core.GetTemplateMetadata(projectDir)
+	if err != nil || meta == nil || meta.Version != "v0.3.0" {
+		t.Fatalf("expected metadata to remain at v0.3.0 after --dry-run, got %+v err=%v", meta, err)
+	}
+	if fileExists(filepath.Join(projectDir, "packages", "router")) {
+		t.Fatalf("expected packages/router NOT to be created during --dry-run")
 	}
 }

@@ -1,9 +1,24 @@
 import path from 'node:path'
-import { statSync, watch, watchFile, existsSync } from 'node:fs'
+import { statSync, watch, watchFile, existsSync, readFileSync } from 'node:fs'
 import { Elysia } from 'elysia'
 import { injectGoogleFonts, type DexFontsConfig } from './fonts'
 
-const CONFIG_FILENAMES = ['dex.config.ts', 'dex.config.js', 'dex.config.mjs', 'dex.config.cjs']
+const CONFIG_FILENAMES = [
+	'config/core/index.ts',
+	'config/core/index.js',
+	'config/core/index.mjs',
+	'config/core/index.json',
+	'dex.config.ts',
+	'dex.config.js',
+	'dex.config.mjs',
+	'dex.config.json',
+	'dex.config.cjs',
+	'config/dex.config.ts',
+	'config/dex.config.js',
+	'config/dex.config.mjs',
+	'config/dex.config.json',
+	'config/dex.config.cjs',
+]
 
 async function loadProjectRootAndConfig() {
 	let dir = path.resolve(process.cwd())
@@ -15,8 +30,13 @@ async function loadProjectRootAndConfig() {
 			const candidate = path.join(dir, filename)
 			if (existsSync(candidate)) {
 				try {
-					const mod = await import(candidate)
-					const cfg = mod.default ?? mod ?? {}
+					let cfg: any
+					if (candidate.endsWith('.json')) {
+						cfg = JSON.parse(readFileSync(candidate, 'utf8'))
+					} else {
+						const mod = await import(candidate)
+						cfg = mod.default ?? mod ?? {}
+					}
 					return { root: dir, config: cfg }
 				} catch {}
 			}
@@ -118,8 +138,8 @@ export function dexDevReloadRouter(opts?: {
 	const pollIntervalMs = opts?.pollIntervalMs ?? 250
 
 	// Precedence: explicit opts > values from dex.config > defaults (all relative to project root from config location)
-	const configWatchFiles = (dexConfig as any)?.watchFiles ?? (dexConfig as any)?.devWatchFiles
-	const configWatchDirs = (dexConfig as any)?.watchDirs ?? (dexConfig as any)?.devWatchDirs
+	const configWatchFiles = (dexConfig as any)?.watchFiles ?? (dexConfig as any)?.devWatchFiles ?? (dexConfig as any)?.server?.watchFiles
+	const configWatchDirs = (dexConfig as any)?.watchDirs ?? (dexConfig as any)?.devWatchDirs ?? (dexConfig as any)?.server?.watchDirs
 
 	const fromUserFiles = resolveList(projectRoot, opts?.watchFiles)
 	const fromConfigFiles = resolveList(projectRoot, configWatchFiles)

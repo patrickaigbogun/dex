@@ -1,7 +1,7 @@
 export type GenerateApiOptions = {
     /** URL or local file path to OpenAPI specification (JSON or YAML) */
     spec: string | object;
-    /** Output file path. Defaults to 'core/api/generated.ts' */
+    /** Output file path. Defaults to '.dex/generated/api.ts' */
     outTs?: string;
     /** Root directory for path resolution */
     root?: string;

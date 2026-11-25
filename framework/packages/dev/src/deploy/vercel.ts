@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { dexBuildClient, dexPrepareBuild, dexPrerender } from '../tasks'
+import { dexBuildClient, dexPrepareBuild, dexPrerender, resolveProjectPaths } from '../tasks'
 
 export type VercelBuildOptions = {
 	rootDir: string
@@ -95,7 +95,21 @@ async function updateBuildHtmlCacheBusting(buildDir: string, clientHash: string 
 }
 
 async function loadSubdomainsConfig(rootDir: string): Promise<Record<string, string>> {
-	for (const filename of ['dex.config.ts', 'dex.config.js', 'dex.config.mjs', 'dex.config.json']) {
+	const candidates = [
+		'config/core/index.ts',
+		'config/core/index.js',
+		'config/core/index.mjs',
+		'config/core/index.json',
+		'dex.config.ts',
+		'dex.config.js',
+		'dex.config.mjs',
+		'dex.config.json',
+		'config/dex.config.ts',
+		'config/dex.config.js',
+		'config/dex.config.mjs',
+		'config/dex.config.json',
+	]
+	for (const filename of candidates) {
 		const cfgPath = path.join(rootDir, filename)
 		if (!existsSync(cfgPath)) continue
 		try {
@@ -138,13 +152,20 @@ async function copyStaticArtifacts(buildDir: string, staticDir: string): Promise
 	}
 }
 
-function hasApiRoutesModule(rootDir: string): boolean {
-	return (
-		existsSync(path.join(rootDir, 'routes', 'api', 'index.ts')) ||
-		existsSync(path.join(rootDir, 'routes', 'api', 'index.js')) ||
-		existsSync(path.join(rootDir, 'routes', 'api.ts')) ||
-		existsSync(path.join(rootDir, 'routes', 'api.js'))
-	)
+const API_ENTRY_CANDIDATES = [
+	'routes/api/index.ts',
+	'routes/api/index.js',
+	'routes/api.ts',
+	'routes/api.js',
+] as const
+
+function resolveApiRoutesModule(rootDir: string): string | null {
+	for (const rel of API_ENTRY_CANDIDATES) {
+		if (existsSync(path.join(rootDir, rel))) {
+			return `./${rel}`
+		}
+	}
+	return null
 }
 
 function buildVercelConfig(subdomains: Record<string, string>): VercelBuildOutputConfig {
@@ -199,51 +220,64 @@ export async function dexBuildVercel(
 	}
 
 	// 1. Generate routes
-	await runChecked(
-		[
-			'bunx',
-			'--bun',
-			'dex-router',
-			'generate',
-			'--pagesDir',
-			'web/pages',
-			'--layoutsDir',
-			'web/layouts',
-			'--outRoutesTs',
-			'core/router/.generated/routes.ts',
-			'--outRoutesJson',
-			'core/router/.generated/manifest.json',
-			'--outLayoutsTs',
-			'core/router/.generated/layouts.ts',
-		],
-		rootDir,
-		'dex-router generate'
-	)
+	const paths = resolveProjectPaths(rootDir)
+	const hasPages = existsSync(path.join(rootDir, 'web', 'pages'))
+	const hasWebHtml = existsSync(path.join(rootDir, 'web', 'public', 'index.html'))
 
-	// 2. Prepare build directory
-	await dexPrepareBuild({ rootDir })
-
-	// 3. Prerender static pages
-	await dexPrerender({ rootDir })
-
-	// 4. Build CSS if tailwindcss is present
-	const stylesInput = path.join(rootDir, 'web', 'styles', 'index.css')
-	if (existsSync(stylesInput) && hasTailwindInstalled(rootDir)) {
+	if (paths.isLegacy || hasPages) {
 		await runChecked(
-			['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'build/assets/styles.css', '--minify'],
+			[
+				'bunx',
+				'--bun',
+				'dex-router',
+				'generate',
+				'--pagesDir',
+				'web/pages',
+				'--layoutsDir',
+				'web/layouts',
+				'--outRoutesTs',
+				paths.outRoutesTs,
+				'--outRoutesJson',
+				paths.outRoutesJson,
+				'--outLayoutsTs',
+				paths.outLayoutsTs,
+			],
 			rootDir,
-			'tailwindcss'
+			'dex-router generate'
 		)
 	}
 
-	// 5. Build client ESM bundle
-	await dexBuildClient({ rootDir, defineArgs })
-
-	// 6. Content-hash busting on build/index.html and prerendered HTML files
 	const buildDir = path.join(rootDir, 'build')
-	const clientHash = await computeShortHash(path.join(buildDir, 'assets', 'client.js'))
-	const cssHash = await computeShortHash(path.join(buildDir, 'assets', 'styles.css'))
-	await updateBuildHtmlCacheBusting(buildDir, clientHash, cssHash)
+	if (paths.isLegacy || hasWebHtml) {
+		// 2. Prepare build directory
+		await dexPrepareBuild({ rootDir })
+
+		// 3. Prerender static pages
+		if (paths.isLegacy || hasPages) {
+			await dexPrerender({ rootDir })
+		}
+
+		// 4. Build CSS if tailwindcss is present
+		const stylesInput = path.join(rootDir, 'web', 'styles', 'index.css')
+		if (existsSync(stylesInput) && hasTailwindInstalled(rootDir)) {
+			await runChecked(
+				['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'build/assets/styles.css', '--minify'],
+				rootDir,
+				'tailwindcss'
+			)
+		}
+
+		// 5. Build client ESM bundle
+		await dexBuildClient({ rootDir, defineArgs })
+
+		// 6. Content-hash busting on build/index.html and prerendered HTML files
+		const clientHash = await computeShortHash(path.join(buildDir, 'assets', 'client.js'))
+		const cssHash = await computeShortHash(path.join(buildDir, 'assets', 'styles.css'))
+		await updateBuildHtmlCacheBusting(buildDir, clientHash, cssHash)
+	} else {
+		await rm(buildDir, { recursive: true, force: true })
+		await mkdir(buildDir, { recursive: true })
+	}
 
 	// 7. Assemble .vercel/output structure
 	if (outputDir === path.resolve(rootDir) || !outputDir.startsWith(path.resolve(rootDir) + path.sep)) {
@@ -259,12 +293,15 @@ export async function dexBuildVercel(
 
 	// 8. Bundle Elysia API routes into serverless function
 	const tempEntryPath = path.join(rootDir, `.dex-vercel-api-${process.pid}-${Date.now()}.ts`)
-	const entrySource = hasApiRoutesModule(rootDir)
+	const apiEntryRel = resolveApiRoutesModule(rootDir)
+	const entrySource = apiEntryRel
 		? [
 				`import { Elysia } from 'elysia'`,
-				`import { apiRoutes } from './routes/api'`,
+				`import * as apiMod from ${JSON.stringify(apiEntryRel)}`,
 				``,
-				`const app = new Elysia().group('/api', (api) => api.use(apiRoutes()))`,
+				`const candidate: any = (apiMod as any)?.apiRoutes ?? (apiMod as any)?.default`,
+				`const resolved = typeof candidate === 'function' ? candidate() : candidate`,
+				`const app = resolved ? new Elysia().group('/api', (api) => api.use(resolved)) : new Elysia()`,
 				``,
 				`export const fetch = (req: Request) => app.fetch(req)`,
 				`export default { fetch }`,

@@ -21,7 +21,7 @@ type DexConfig = {
 	apiPrefix?: string
 }
 
-const DEFAULT_PACKAGES = ['router', 'server', 'dev', 'pie']
+export const DEFAULT_PACKAGES = ['core', 'router', 'server', 'dev', 'pie', 'validation']
 
 function usage(exitCode = 0): never {
 	const out = exitCode === 0 ? console.log : console.error
@@ -29,8 +29,10 @@ function usage(exitCode = 0): never {
 
 Usage:
   dex scaffold <dir>
-  dex sync [--interactive] [--no-cache | --fresh] [--force]
+  dex install [--packages <list>] [--tag <tag>] [--no-install]
+  dex sync [--dry-run] [--include-template] [--interactive] [--no-cache | --fresh] [--force]
   dex update [version] [--force]
+  dex prune
   dex versions | dex list
   dex use <version>
   dex tag <patch|minor|major>
@@ -58,10 +60,19 @@ Scaffold options:
 	--template-url <url>       Download template .tgz from a URL (skips GitHub)
   --no-install               Do not run bun install
 
+Install options:
+  --packages <list>          Comma-separated package list override (default: resolved from config/core/)
+  --tag <tag>                Release tag (default: .dex/metadata.json or latest)
+  --repo <owner/repo>        GitHub repo containing dex-package-*.tgz assets
+  --no-install               Do not run bun install
+
 Sync options:
-  --interactive              Interactively select files to sync (default: all)
-  --repo <owner/repo>        Template repo (default from .dex/metadata.json)
+  --dry-run                  Print packages that would be upgraded/added without modifying disk
+  --include-template         Also sync upstream template file diffs
+  --interactive              Interactively select files to sync (with --include-template)
+  --repo <owner/repo>        Template/package repo (default from .dex/metadata.json)
   --tag <tag>                Release tag (default: latest)
+  --no-install               Do not run bun install
 
 Start options:
   -p                         Production mode (NODE_ENV=production)
@@ -138,7 +149,7 @@ export function parseArgs(argv: string[]) {
 			positional.push(a)
 			continue
 		}
-		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f' || a === '--no-cache' || a === '--fresh' || a === '--all' || a === '--force' || a === '--interactive' || a === '--dry-run' || a === '--prod') {
+		if (a === '--no-install' || a === '-v' || a === '--version' || a === '-f' || a === '--no-cache' || a === '--fresh' || a === '--all' || a === '--force' || a === '--interactive' || a === '--dry-run' || a === '--prod' || a === '--include-template') {
 			flags[a.replace(/^--?/, '')] = true
 			continue
 		}
@@ -265,18 +276,318 @@ async function fetchTemplateDiff(repo: string, tag: string): Promise<TemplateDif
 	}
 }
 
+export function parseSHA256Sums(content: string): Record<string, string> {
+	const sums: Record<string, string> = {}
+	for (const rawLine of content.split('\n')) {
+		const trimmed = rawLine.trim()
+		if (!trimmed || trimmed.startsWith('#')) continue
+		const parts = trimmed.split(/\s+/)
+		if (parts.length < 2) continue
+		const hash = parts[0]!.toLowerCase()
+		if (!/^[0-9a-f]{64}$/.test(hash)) continue
+		const name = parts[1]!.replace(/^\*/, '').replace(/^\.\//, '')
+		if (name) sums[name] = hash
+	}
+	return sums
+}
+
+async function fetchReleaseSHA256Sums(repo: string, tag: string): Promise<Record<string, string> | null> {
+	validateTag(tag)
+	const url = `https://github.com/${repo}/releases/download/${encodeURIComponent(tag)}/SHA256SUMS`
+	const headers: Record<string, string> = {}
+	if (process.env.GITHUB_TOKEN) {
+		const parsedUrl = new URL(url)
+		if (parsedUrl.protocol === 'https:' && (parsedUrl.hostname === 'api.github.com' || parsedUrl.hostname === 'github.com')) {
+			headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+		}
+	}
+	const res = await fetchWithTimeout(url, { headers, redirect: 'follow' })
+	if (res.status === 404) return null
+	if (!res.ok) throw new Error(`Failed to fetch SHA256SUMS (${res.status}): ${url}`)
+	return parseSHA256Sums(await res.text())
+}
+
+async function computeFileSHA256(filePath: string): Promise<string> {
+	const data = await readFile(filePath)
+	return crypto.createHash('sha256').update(data).digest('hex')
+}
+
+function normalizeTagWithV(tag: string): string {
+	if (!tag.startsWith('v') && /^\d+\.\d+\.\d+/.test(tag)) {
+		return `v${tag}`
+	}
+	return tag
+}
+
+function resolvePackageRepo(flags: Record<string, string | boolean>): string {
+	return packageRepoFromEnvOrFlag(flags) ?? repoFromEnvOrFlag(flags)
+}
+
+function detectInstalledPackages(root: string): string[] {
+	const packagesDir = path.join(root, 'packages')
+	const seen = new Set<string>()
+	const result: string[] = []
+
+	if (existsSync(packagesDir)) {
+		try {
+			const { readdirSync } = require('node:fs') as typeof import('node:fs')
+			for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+				if (!entry.isDirectory()) continue
+				if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+				if (existsSync(path.join(packagesDir, entry.name, 'package.json'))) {
+					if (!seen.has(entry.name)) {
+						seen.add(entry.name)
+						result.push(entry.name)
+					}
+				}
+			}
+		} catch {}
+	}
+
+	for (const pkg of resolveEnabledPackages(root)) {
+		if (!seen.has(pkg)) {
+			seen.add(pkg)
+			result.push(pkg)
+		}
+	}
+	return result
+}
+
+async function downloadAndExtractPackages(
+	root: string,
+	repo: string,
+	tag: string,
+	packages: string[],
+	noCache: boolean
+): Promise<Record<string, string>> {
+	const packagesDir = path.join(root, 'packages')
+	await mkdir(packagesDir, { recursive: true })
+
+	let sums: Record<string, string> | null = null
+	let sumsErr: Error | null = null
+	try {
+		sums = await fetchReleaseSHA256Sums(repo, tag)
+	} catch (err: any) {
+		sumsErr = err instanceof Error ? err : new Error(String(err))
+	}
+
+	const versions: Record<string, string> = {}
+	const { rm } = await import('node:fs/promises')
+
+	for (const pkg of packages) {
+		const asset = `dex-package-${pkg}.tgz`
+		const { path: p, cache } = await getTemplateTgzPath(repo, tag, asset, { noCache })
+		if (sumsErr && cache === 'miss') {
+			throw new Error(`Failed to fetch SHA256SUMS for ${repo}@${tag}: ${sumsErr.message}`)
+		}
+		if (sums?.[asset]) {
+			const actual = await computeFileSHA256(p)
+			if (actual !== sums[asset]) {
+				throw new Error(`Checksum verification failed for ${asset} (expected ${sums[asset]}, got ${actual})`)
+			}
+		}
+		process.stdout.write(`   package ${pkg}: ${cache} (${asset})\n`)
+
+		const outDir = path.join(packagesDir, pkg)
+		const tmpExtract = path.join(packagesDir, `.tmp-${pkg}-${process.pid}-${Date.now()}`)
+		await rm(tmpExtract, { recursive: true, force: true })
+		try {
+			await extractTemplate(p, tmpExtract)
+			await rm(outDir, { recursive: true, force: true })
+			await rename(tmpExtract, outDir)
+		} catch (err) {
+			await rm(tmpExtract, { recursive: true, force: true }).catch(() => {})
+			throw err
+		}
+
+		const pkgJsonPath = path.join(outDir, 'package.json')
+		if (!existsSync(pkgJsonPath)) continue
+		try {
+			const pkgJson = JSON.parse(await readFile(pkgJsonPath, 'utf8'))
+			if (pkgJson?.name && pkgJson?.version) versions[pkgJson.name] = pkgJson.version
+		} catch {
+			// ignore
+		}
+	}
+
+	return versions
+}
+
+async function writeFileIfMissing(filePath: string, content: string) {
+	if (existsSync(filePath)) return
+	await mkdir(path.dirname(filePath), { recursive: true })
+	await writeFile(filePath, content)
+}
+
+async function scaffoldMissingStarterFiles(root: string, packages: string[]) {
+	if (packages.includes('router') && !existsSync(path.join(root, 'web', 'pages'))) {
+		await writeFileIfMissing(
+			path.join(root, 'web', 'pages', 'index.tsx'),
+			`export const metadata = { title: 'Dex App' }
+
+export default function Page() {
+	return (
+		<main className="max-w-2xl mx-auto px-6 py-16 space-y-4">
+			<h1 className="text-3xl font-semibold">Dex App</h1>
+			<p>Edit web/pages/index.tsx to get started.</p>
+		</main>
+	)
+}
+`
+		)
+		await writeFileIfMissing(
+			path.join(root, 'web', 'public', 'index.html'),
+			`<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Dex App</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<link rel="stylesheet" href="/assets/styles.css" />
+	</head>
+	<body>
+		<div id="root"></div>
+		<script>
+			(() => {
+				try {
+					const es = new EventSource('/__dev/reload')
+					let reloading = false
+					es.addEventListener('reload', () => {
+						if (reloading) return
+						reloading = true
+						location.reload()
+					})
+					es.onerror = () => {
+						try {
+							es.close()
+						} catch {}
+					}
+				} catch {}
+			})()
+		</script>
+		<script type="module" src="/assets/client.js"></script>
+	</body>
+</html>
+`
+		)
+	}
+
+	if (packages.includes('server') && !existsSync(path.join(root, 'routes', 'api'))) {
+		await writeFileIfMissing(
+			path.join(root, 'routes', 'api', 'index.ts'),
+			`import { Elysia } from 'elysia'
+
+export const apiRoutes = () =>
+	new Elysia({ prefix: '/v1' }).get('/health', () => ({ ok: true }))
+`
+		)
+	}
+
+	if (packages.includes('pie') && !existsSync(path.join(root, 'lib', 'api.ts'))) {
+		await writeFileIfMissing(
+			path.join(root, 'lib', 'api.ts'),
+			`import { createPie } from '@dex/pie'
+import type { ApiRoutes } from '@core/api/generated'
+
+export const api = createPie<ApiRoutes>({
+	prefix: '/api',
+})
+`
+		)
+	}
+}
+
+async function cmdInstall(flags: Record<string, string | boolean>) {
+	if (flags.h || flags.help) {
+		console.log(`
+Usage: dex install [options]
+
+Install enabled framework packages into packages/ and scaffold missing starter files.
+
+Options:
+  --packages <list>   Comma-separated package list override (e.g. router,server)
+  --tag <tag>         Target release tag (default: .dex/metadata.json or latest)
+  --repo <repo>       GitHub repo (default: patrickaigbogun/dex)
+  --no-install        Do not run bun install
+  --no-cache, --fresh Bypass local package cache
+  -h, --help          Show help
+`)
+		return
+	}
+
+	const step = createSteps()
+	const found = await step('Locate project', async () => {
+		const proj = await findProjectRoot(process.cwd())
+		if (!proj) throw new Error('Not in a Dex project (missing config/core/index.* or dex.config.*)')
+		return proj
+	})
+
+	let packages: string[]
+	if (typeof flags.packages === 'string' && flags.packages.trim()) {
+		packages = Array.from(new Set(flags.packages.split(',').map((s) => s.trim()).filter(Boolean)))
+	} else {
+		packages = resolveEnabledPackages(found.root)
+	}
+	if (packages.length === 0) throw new Error('No packages resolved for installation')
+
+	const repo = resolvePackageRepo(flags)
+	let targetTag =
+		(typeof flags.tag === 'string' ? flags.tag : undefined) ??
+		packageTagFromEnvOrFlag(flags) ??
+		undefined
+	if (!targetTag) {
+		const meta = await getTemplateMetadata(found.root)
+		const metaTag = meta?.releaseTag || meta?.version
+		if (metaTag && metaTag !== 'unknown') targetTag = metaTag
+	}
+	if (!targetTag || targetTag === 'latest') {
+		targetTag = await step('Fetch latest release info', async () => {
+			const rel = await getLatestReleaseTag(repo)
+			if (!rel) throw new Error(`Could not determine latest release tag for ${repo}`)
+			return rel
+		})
+	}
+	targetTag = validateTag(normalizeTagWithV(targetTag))
+
+	const noCache = Boolean(flags['no-cache'] || flags.fresh)
+	await step(`Install framework packages (${repo}@${targetTag})`, async () => {
+		const versions = await downloadAndExtractPackages(found.root, repo, targetTag, packages, noCache)
+		await writePackagesIndex(found.root, packages)
+		await updateProjectPackageJson(found.root, packages, versions, true)
+		await writeDexMetadata(found.root, targetTag, targetTag)
+	})
+
+	await step('Scaffold missing starter files', async () => {
+		await scaffoldMissingStarterFiles(found.root, packages)
+	})
+
+	if (!flags['no-install']) {
+		await step('Install dependencies (bun install)', async () => {
+			const { cmd, env } = bunCmd()
+			await run(cmd, ['install'], found.root, env)
+		})
+	}
+
+	console.log(`\nInstalled ${packages.length} framework package(s) from ${repo}@${targetTag} ✓`)
+	process.exit(0)
+}
+
 async function cmdSync(flags: Record<string, string | boolean>) {
 	if (flags.h || flags.help) {
 		console.log(`
 Usage: dex sync [options]
 
-Sync files from upstream template release to update your project.
+Upgrade framework packages in packages/ (default), or sync upstream template diffs (--include-template).
 
 Options:
+  --dry-run           Print packages that would be upgraded/added without modifying disk
+  --include-template  Also run upstream template file diff sync
+  --interactive       Interactively select template files to sync (with --include-template)
   --tag <tag>         Target release tag to sync to (default: latest)
-  --interactive       Interactively select which changed files to sync
   --force             Force sync even if project is already on the target version
   --repo <repo>       GitHub repo (default: patrickaigbogun/dex)
+  --no-install        Do not run bun install
+  --no-cache, --fresh Bypass local cache
   -h, --help          Show help
 `)
 		return
@@ -286,12 +597,72 @@ Options:
 
 	const found = await step('Locate project', async () => {
 		const proj = await findProjectRoot(process.cwd())
-		if (!proj) throw new Error('Not in a Dex project (missing dex.config.*)')
+		if (!proj) throw new Error('Not in a Dex project (missing config/core/index.* or dex.config.*)')
 		return proj
 	})
 
+	if (!flags['include-template']) {
+		const meta = await getTemplateMetadata(found.root)
+		const currentTag = meta?.version || meta?.releaseTag || null
+		const repo = resolvePackageRepo(flags)
+
+		let targetTag =
+			(typeof flags.tag === 'string' ? flags.tag : undefined) ??
+			(typeof flags.to === 'string' ? flags.to : undefined) ??
+			packageTagFromEnvOrFlag(flags) ??
+			undefined
+		if (targetTag) validateTag(targetTag)
+		if (!targetTag || targetTag === 'latest') {
+			targetTag = await step('Fetch latest release info', async () => {
+				const rel = await getLatestReleaseTag(repo)
+				if (!rel) throw new Error(`Could not determine latest release tag for ${repo}`)
+				return rel
+			})
+		}
+		targetTag = validateTag(normalizeTagWithV(targetTag))
+
+		const packages = detectInstalledPackages(found.root)
+		if (flags['dry-run']) {
+			const fromLabel = currentTag || 'untracked'
+			console.log(`\nDry run: packages for ${found.root} (${fromLabel} -> ${targetTag}):`)
+			for (const pkg of packages) {
+				const pkgDir = path.join(found.root, 'packages', pkg)
+				if (existsSync(pkgDir)) {
+					console.log(`  - ${pkg}: ${fromLabel} -> ${targetTag} (upgrade)`)
+				} else {
+					console.log(`  - ${pkg}: (not installed) -> ${targetTag} (add)`)
+				}
+			}
+			return
+		}
+
+		if (currentTag === targetTag && !flags.force) {
+			console.log(`\nProject packages are already up to date with ${targetTag} (latest) ✓`)
+			console.log('Use `dex sync --force` to re-sync packages.')
+			return
+		}
+
+		const noCache = Boolean(flags['no-cache'] || flags.fresh)
+		await step(`Upgrade framework packages (${repo}@${targetTag})`, async () => {
+			const versions = await downloadAndExtractPackages(found.root, repo, targetTag, packages, noCache)
+			await writePackagesIndex(found.root, packages)
+			await updateProjectPackageJson(found.root, packages, versions, false)
+			await writeDexMetadata(found.root, targetTag, targetTag)
+		})
+
+		if (!flags['no-install']) {
+			await step('Install dependencies (bun install)', async () => {
+				const { cmd, env } = bunCmd()
+				await run(cmd, ['install'], found.root, env)
+			})
+		}
+
+		console.log(`\nUpgraded ${packages.length} package(s) from ${repo}@${targetTag} ✓`)
+		process.exit(0)
+	}
+
 	const metadata = await step('Load template metadata', async () => {
-		const meta = await getTemplateMetadata()
+		const meta = await getTemplateMetadata(found.root)
 		if (!meta) {
 			// Metadata not found, but project exists. Ask if user wants to continue
 			const proceed = await promptConfirm('This is an older Dex project without metadata. Continue syncing?')
@@ -318,9 +689,7 @@ Options:
 		})
 	}
 
-	if (!targetTag.startsWith('v') && /^\d+\.\d+\.\d+/.test(targetTag)) {
-		targetTag = `v${targetTag}`
-	}
+	targetTag = normalizeTagWithV(targetTag)
 
 	if (currentTag === targetTag && !flags.force) {
 		console.log(`\nProject is already up to date with template ${targetTag} (latest) ✓`)
@@ -422,6 +791,16 @@ Options:
 			}
 		}
 	})
+
+	if (existsSync(path.join(found.root, 'packages'))) {
+		const packages = detectInstalledPackages(found.root)
+		const noCache = Boolean(flags['no-cache'] || flags.fresh)
+		await step(`Upgrade framework packages (${repo}@${targetTag})`, async () => {
+			const versions = await downloadAndExtractPackages(found.root, repo, targetTag, packages, noCache)
+			await writePackagesIndex(found.root, packages)
+			await updateProjectPackageJson(found.root, packages, versions, false)
+		})
+	}
 
 	await step('Update metadata', async () => {
 		await writeDexMetadata(found.root, targetTag, targetTag)
@@ -777,10 +1156,14 @@ export function bumpSemver(current: SemverParts, kind: 'patch' | 'minor' | 'majo
 	return [maj + 1, 0, 0]
 }
 
-async function findProjectRoot(startDir: string) {
+export async function findProjectRoot(startDir: string) {
 	let dir = path.resolve(startDir)
 	while (true) {
 		for (const rel of [
+			'config/core/index.ts',
+			'config/core/index.js',
+			'config/core/index.mjs',
+			'config/core/index.json',
 			'dex.config.ts',
 			'dex.config.js',
 			'dex.config.mjs',
@@ -810,6 +1193,34 @@ async function findProjectRoot(startDir: string) {
 	}
 }
 
+function hasConfigVariant(dir: string, base: string): boolean {
+	for (const ext of ['.ts', '.js', '.mjs', '.json']) {
+		if (existsSync(path.join(dir, `${base}${ext}`))) return true
+	}
+	return false
+}
+
+export function resolveEnabledPackages(root: string): string[] {
+	const coreConfigDir = path.join(root, 'config', 'core')
+	const mapping: Array<[string, string]> = [
+		['router', 'router'],
+		['server', 'server'],
+		['build', 'dev'],
+		['api', 'pie'],
+		['validation', 'validation'],
+	]
+	const pkgs = ['core']
+	let foundAnySplit = false
+	for (const [configName, pkgName] of mapping) {
+		if (hasConfigVariant(coreConfigDir, configName)) {
+			foundAnySplit = true
+			pkgs.push(pkgName)
+		}
+	}
+	if (!foundAnySplit) return [...DEFAULT_PACKAGES]
+	return pkgs
+}
+
 async function loadDexConfig(found: { root: string; configPath: string }): Promise<DexConfig> {
 	if (found.configPath.endsWith('package.json')) {
 		const pkg = JSON.parse(await readFile(found.configPath, 'utf8'))
@@ -836,18 +1247,47 @@ async function setPackageName(destDir: string) {
 	}
 }
 
-async function updateDexPackageVersions(destDir: string, versions: Record<string, string>) {
+async function updateProjectPackageJson(
+	destDir: string,
+	packageDirs: string[],
+	versions: Record<string, string>,
+	addWorkspaceDeps: boolean
+) {
 	const pkgPath = path.join(destDir, 'package.json')
-	if (!existsSync(pkgPath)) return
-	try {
-		const pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
-		const dex = pkg.dex && typeof pkg.dex === 'object' ? pkg.dex : {}
+	let pkg: Record<string, any> | null = null
+	if (existsSync(pkgPath)) {
+		try {
+			pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
+		} catch {
+			pkg = null
+		}
+	}
+	if (!pkg || typeof pkg !== 'object') {
+		pkg = {
+			name: path.basename(destDir),
+			private: true,
+			type: 'module',
+			workspaces: ['packages/*'],
+		}
+	}
+	if (addWorkspaceDeps && packageDirs.length > 0) {
+		const deps = pkg.dependencies && typeof pkg.dependencies === 'object' ? { ...pkg.dependencies } : {}
+		for (const p of packageDirs) {
+			const depName = `@dex/${p}`
+			if (!(depName in deps)) deps[depName] = 'workspace:*'
+		}
+		pkg.dependencies = deps
+	}
+	if (Object.keys(versions).length > 0) {
+		const dex = pkg.dex && typeof pkg.dex === 'object' ? { ...pkg.dex } : {}
 		dex.packageVersions = { ...(dex.packageVersions ?? {}), ...versions }
 		pkg.dex = dex
-		await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
-	} catch {
-		// ignore
 	}
+	await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
+}
+
+async function updateDexPackageVersions(destDir: string, versions: Record<string, string>) {
+	await updateProjectPackageJson(destDir, [], versions, false)
 }
 
 async function writeDexMetadata(destDir: string, templateVersion: string, templateTag: string) {
@@ -882,6 +1322,10 @@ function runScaffoldChecks(destDir: string, packageDirs: string[]) {
 	if (!existsSync(pkgJson)) warnings.push('Missing package.json in project root.')
 
 	const dexConfig = findAnyExisting(destDir, [
+		'config/core/index.ts',
+		'config/core/index.js',
+		'config/core/index.mjs',
+		'config/core/index.json',
 		'dex.config.ts',
 		'dex.config.js',
 		'dex.config.mjs',
@@ -891,7 +1335,7 @@ function runScaffoldChecks(destDir: string, packageDirs: string[]) {
 		'config/dex.config.mjs',
 		'config/dex.config.json',
 	])
-	if (!dexConfig) warnings.push('Missing dex.config.* (or config/dex.config.*).')
+	if (!dexConfig) warnings.push('Missing config/core/index.* or dex.config.*.')
 
 	const packagesDir = path.join(destDir, 'packages')
 	if (!existsSync(packagesDir)) warnings.push('Missing packages/ directory.')
@@ -1104,9 +1548,12 @@ async function cmdBuild() {
 	if (!found) throw new Error('Not in a Dex project (missing dex.config.*)')
 	const { cmd, env } = bunCmd()
 	const bootstrapBuild = path.join(found.root, 'core/bootstrap/build.ts')
+	const coreBuild = path.join(found.root, 'packages/core/src/build.ts')
 	const bootstrapScripts = path.join(found.root, 'core/bootstrap/scripts.ts')
 	if (existsSync(bootstrapBuild)) {
 		await run(cmd, ['core/bootstrap/build.ts'], found.root, env)
+	} else if (existsSync(coreBuild)) {
+		await run(cmd, ['-e', "import { runBuild } from '@dex/core/build'; await runBuild()"], found.root, env)
 	} else if (existsSync(bootstrapScripts)) {
 		await run(cmd, ['-e', "import('./core/bootstrap/scripts').then(m => m.runBuild())"], found.root, env)
 	} else {
@@ -1133,9 +1580,12 @@ async function cmdStart(prod: boolean) {
 		}
 	} else {
 		const bootstrapDev = path.join(found.root, 'core/bootstrap/dev.ts')
+		const coreDev = path.join(found.root, 'packages/core/src/dev.ts')
 		const bootstrapScripts = path.join(found.root, 'core/bootstrap/scripts.ts')
 		if (existsSync(bootstrapDev)) {
 			await run(cmd, ['core/bootstrap/dev.ts'], found.root, extraEnv)
+		} else if (existsSync(coreDev)) {
+			await run(cmd, ['-e', "import { runDev } from '@dex/core/dev'; await runDev()"], found.root, extraEnv)
 		} else if (existsSync(bootstrapScripts)) {
 			await run(cmd, ['-e', "import('./core/bootstrap/scripts').then(m => m.runDev())"], found.root, extraEnv)
 		} else {
@@ -1172,8 +1622,8 @@ type DexMetadata = {
 	releaseTag?: string
 }
 
-async function getTemplateMetadata(): Promise<DexMetadata | null> {
-	const metadataPath = path.join(process.cwd(), '.dex', 'metadata.json')
+async function getTemplateMetadata(root = process.cwd()): Promise<DexMetadata | null> {
+	const metadataPath = path.join(root, '.dex', 'metadata.json')
 	if (!existsSync(metadataPath)) return null
 	try {
 		return JSON.parse(await readFile(metadataPath, 'utf8'))
@@ -1390,8 +1840,21 @@ async function cmdUpdate(positional: string[], flags: Record<string, string | bo
 		await mkdir(versionDir, { recursive: true })
 		const base = `https://github.com/${repo}/releases/download/${encodeURIComponent(targetTag)}/${asset}`
 		const tmp = `${destBinary}.tmp-${process.pid}-${Date.now()}`
-		await downloadToFile(base, tmp)
-		await rename(tmp, destBinary)
+		const { rm } = await import('node:fs/promises')
+		try {
+			await downloadToFile(base, tmp)
+			const sums = await fetchReleaseSHA256Sums(repo, targetTag)
+			if (sums?.[asset]) {
+				const actual = await computeFileSHA256(tmp)
+				if (actual !== sums[asset]) {
+					throw new Error(`Checksum verification failed for ${asset} (expected ${sums[asset]}, got ${actual})`)
+				}
+			}
+			await rename(tmp, destBinary)
+		} catch (err) {
+			await rm(tmp, { force: true }).catch(() => {})
+			throw err
+		}
 		if (process.platform !== 'win32') {
 			const { chmod } = await import('node:fs/promises')
 			await chmod(destBinary, 0o755)
@@ -1404,6 +1867,43 @@ async function cmdUpdate(positional: string[], flags: Record<string, string | bo
 
 	console.log(`\nSuccessfully updated Dex to ${targetTag} in ${dexHome} ✓`)
 	console.log(`Active binary: ${path.join(dexHome, 'bin', `dex${ext}`)}`)
+}
+
+async function cmdPrune() {
+	const dexHome = getDexHome()
+	const versionsDir = path.join(dexHome, 'versions')
+	if (!existsSync(versionsDir)) {
+		console.log(`Removed 0 inactive versions (no versions directory in ${dexHome})`)
+		return
+	}
+
+	const entries = await readdir(versionsDir, { withFileTypes: true })
+	const versionDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+	if (versionDirs.length === 0) {
+		console.log(`Removed 0 inactive versions from ${versionsDir}`)
+		return
+	}
+
+	const currentLink = path.join(dexHome, 'current')
+	let activeVersion: string | null = null
+	try {
+		const { readlink } = await import('node:fs/promises')
+		const target = await readlink(currentLink)
+		activeVersion = path.basename(target)
+	} catch {}
+
+	if (!activeVersion) {
+		throw new Error(`Cannot determine active version from ${currentLink}; refusing to prune all versions`)
+	}
+
+	const { rm } = await import('node:fs/promises')
+	let removed = 0
+	for (const v of versionDirs) {
+		if (v === activeVersion) continue
+		await rm(path.join(versionsDir, v), { recursive: true, force: true })
+		removed++
+	}
+	console.log(`Removed ${removed} inactive version(s) from ${versionsDir} (kept ${activeVersion}) ✓`)
 }
 
 async function cmdVersions() {
@@ -1592,7 +2092,7 @@ async function main() {
 	}
 
 	if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help' || flags.h || flags.help) {
-		if (cmd !== 'sync') {
+		if (cmd !== 'sync' && cmd !== 'install') {
 			usage(0)
 		}
 	}
@@ -1600,6 +2100,11 @@ async function main() {
 	try {
 		if (cmd === 'update' || cmd === 'upgrade') {
 			await cmdUpdate(positional, flags)
+			return
+		}
+
+		if (cmd === 'prune') {
+			await cmdPrune()
 			return
 		}
 
@@ -1617,6 +2122,16 @@ async function main() {
 			const dir = positional[1]
 			if (!dir) usage(1)
 			await cmdScaffold(dir, flags)
+			return
+		}
+
+		if (cmd === 'install') {
+			await cmdInstall(flags)
+			return
+		}
+
+		if (cmd === 'sync') {
+			await cmdSync(flags)
 			return
 		}
 

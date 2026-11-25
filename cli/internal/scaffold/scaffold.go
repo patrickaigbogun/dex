@@ -10,15 +10,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/patrickaigbogun/dex/cli/internal/core"
+	"github.com/patrickaigbogun/dex/cli/internal/runner"
 )
 
 var (
-	semverStartRe     = regexp.MustCompile(`^\d+\.\d+\.\d+`)
-	fetchTemplateDiff = core.FetchTemplateDiff
+	semverStartRe          = regexp.MustCompile(`^\d+\.\d+\.\d+`)
+	fetchTemplateDiff      = core.FetchTemplateDiff
+	fetchReleaseSHA256Sums = core.FetchReleaseSHA256Sums
+	getLatestReleaseTag    = core.GetLatestReleaseTag
+	validPkgNameRe         = regexp.MustCompile("^[a-z0-9][a-z0-9-]*$")
 )
+
+func validatePackageName(pkg string) error {
+	if !validPkgNameRe.MatchString(pkg) {
+		return fmt.Errorf("invalid package name %q: must match ^[a-z0-9][a-z0-9-]*$", pkg)
+	}
+	return nil
+}
 
 func templatePathFromEnvOrFlag(args core.ParsedArgs) (string, error) {
 	p := args.GetFlag("template")
@@ -67,32 +79,51 @@ func setPackageName(destDir string) error {
 	return nil
 }
 
-func updateDexPackageVersions(destDir string, versions map[string]string) {
+func updateProjectPackageJSON(destDir string, packageDirs []string, versions map[string]string, addWorkspaceDeps bool) {
 	pkgPath := filepath.Join(destDir, "package.json")
-	data, err := os.ReadFile(pkgPath)
-	if err != nil {
-		return
-	}
-
 	var pkg map[string]any
-	if err := json.Unmarshal(data, &pkg); err != nil || pkg == nil {
-		return
+	if data, err := os.ReadFile(pkgPath); err == nil {
+		_ = json.Unmarshal(data, &pkg)
+	}
+	if pkg == nil {
+		pkg = map[string]any{
+			"name":       filepath.Base(destDir),
+			"private":    true,
+			"type":       "module",
+			"workspaces": []string{"packages/*"},
+		}
 	}
 
-	dexMap, ok := pkg["dex"].(map[string]any)
-	if !ok || dexMap == nil {
-		dexMap = make(map[string]any)
+	if addWorkspaceDeps && len(packageDirs) > 0 {
+		deps, ok := pkg["dependencies"].(map[string]any)
+		if !ok || deps == nil {
+			deps = make(map[string]any)
+		}
+		for _, p := range packageDirs {
+			depName := "@dex/" + p
+			if _, exists := deps[depName]; !exists {
+				deps[depName] = "workspace:*"
+			}
+		}
+		pkg["dependencies"] = deps
 	}
 
-	pkgVersions, ok := dexMap["packageVersions"].(map[string]any)
-	if !ok || pkgVersions == nil {
-		pkgVersions = make(map[string]any)
+	if len(versions) > 0 {
+		dexMap, ok := pkg["dex"].(map[string]any)
+		if !ok || dexMap == nil {
+			dexMap = make(map[string]any)
+		}
+
+		pkgVersions, ok := dexMap["packageVersions"].(map[string]any)
+		if !ok || pkgVersions == nil {
+			pkgVersions = make(map[string]any)
+		}
+		for k, v := range versions {
+			pkgVersions[k] = v
+		}
+		dexMap["packageVersions"] = pkgVersions
+		pkg["dex"] = dexMap
 	}
-	for k, v := range versions {
-		pkgVersions[k] = v
-	}
-	dexMap["packageVersions"] = pkgVersions
-	pkg["dex"] = dexMap
 
 	encoded, err := json.MarshalIndent(pkg, "", "  ")
 	if err != nil {
@@ -102,6 +133,10 @@ func updateDexPackageVersions(destDir string, versions map[string]string) {
 	_ = os.WriteFile(pkgPath, encoded, 0o644)
 }
 
+func updateDexPackageVersions(destDir string, versions map[string]string) {
+	updateProjectPackageJSON(destDir, nil, versions, false)
+}
+
 func writePackagesIndex(destDir string, packageDirs []string) error {
 	packagesDir := filepath.Join(destDir, "packages")
 	if err := os.MkdirAll(packagesDir, 0o755); err != nil {
@@ -109,6 +144,9 @@ func writePackagesIndex(destDir string, packageDirs []string) error {
 	}
 	lines := make([]string, 0, len(packageDirs))
 	for _, p := range packageDirs {
+		if err := validatePackageName(p); err != nil {
+			return err
+		}
 		lines = append(lines, fmt.Sprintf("export * from './%s/src/index'", p))
 	}
 	content := strings.Join(lines, "\n") + "\n"
@@ -138,6 +176,10 @@ func runScaffoldChecks(destDir string, packageDirs []string) []string {
 	}
 
 	dexConfig := findAnyExisting(destDir, []string{
+		filepath.Join("config", "core", "index.ts"),
+		filepath.Join("config", "core", "index.js"),
+		filepath.Join("config", "core", "index.mjs"),
+		filepath.Join("config", "core", "index.json"),
 		"dex.config.ts",
 		"dex.config.js",
 		"dex.config.mjs",
@@ -148,7 +190,7 @@ func runScaffoldChecks(destDir string, packageDirs []string) []string {
 		filepath.Join("config", "dex.config.json"),
 	})
 	if dexConfig == "" {
-		warnings = append(warnings, "Missing dex.config.* (or config/dex.config.*).")
+		warnings = append(warnings, "Missing config/core/index.* or dex.config.*.")
 	}
 
 	if !fileExists(filepath.Join(destDir, "packages")) {
@@ -315,35 +357,9 @@ func CmdScaffold(dirArg string, args core.ParsedArgs) error {
 			}
 		}
 
-		packagesDir := filepath.Join(destDir, "packages")
-		if err := os.MkdirAll(packagesDir, 0o755); err != nil {
+		versions, err := downloadAndExtractPackages(destDir, pkgRepo, pkgTag, core.DefaultPackages, noCache)
+		if err != nil {
 			return err
-		}
-
-		versions := make(map[string]string)
-		for _, pkg := range core.DefaultPackages {
-			asset := fmt.Sprintf("dex-package-%s.tgz", pkg)
-			p, cache, err := core.GetTemplateTgzPath(pkgRepo, pkgTag, asset, noCache)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("   package %s: %s (%s)\n", pkg, cache, asset)
-
-			outDir := filepath.Join(packagesDir, pkg)
-			if err := core.ExtractTemplate(p, outDir); err != nil {
-				return err
-			}
-
-			pkgJSONPath := filepath.Join(outDir, "package.json")
-			if data, err := os.ReadFile(pkgJSONPath); err == nil {
-				var parsed struct {
-					Name    string `json:"name"`
-					Version string `json:"version"`
-				}
-				if json.Unmarshal(data, &parsed) == nil && parsed.Name != "" && parsed.Version != "" {
-					versions[parsed.Name] = parsed.Version
-				}
-			}
 		}
 
 		if err := writePackagesIndex(destDir, core.DefaultPackages); err != nil {
@@ -375,18 +391,7 @@ func CmdScaffold(dirArg string, args core.ParsedArgs) error {
 	}
 
 	if !args.HasFlag("no-install") {
-		if err := core.StepRun("Install dependencies (bun install)", func() error {
-			bunPath, err := exec.LookPath("bun")
-			if err != nil {
-				return errors.New("bun not found in PATH (pass --no-install to skip)")
-			}
-			cmd := exec.Command(bunPath, "install")
-			cmd.Dir = destDir
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			cmd.Stdin = os.Stdin
-			return cmd.Run()
-		}); err != nil {
+		if err := runBunInstall(destDir); err != nil {
 			return err
 		}
 	} else {
@@ -435,19 +440,255 @@ func copyFile(src, dst string) error {
 	return closeErr
 }
 
-// CmdSync syncs changed template files from an upstream release into the current Dex project.
-func CmdSync(args core.ParsedArgs) error {
+func resolvePackageRepo(args core.ParsedArgs) (string, error) {
+	pkgRepo, err := core.PackageRepoFromEnvOrFlag(args)
+	if err != nil {
+		return "", err
+	}
+	if pkgRepo != "" {
+		return pkgRepo, nil
+	}
+	return core.RepoFromEnvOrFlag(args)
+}
+
+func parsePackageListFlag(raw string) ([]string, error) {
+	var out []string
+	seen := make(map[string]bool)
+	for _, part := range strings.Split(raw, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" || seen[p] {
+			continue
+		}
+		if err := validatePackageName(p); err != nil {
+			return nil, err
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func detectInstalledPackages(root string) []string {
+	packagesDir := filepath.Join(root, "packages")
+	var result []string
+	seen := make(map[string]bool)
+
+	if entries, err := os.ReadDir(packagesDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if name == "node_modules" || strings.HasPrefix(name, ".") {
+				continue
+			}
+			if fileExists(filepath.Join(packagesDir, name, "package.json")) {
+				if !seen[name] {
+					seen[name] = true
+					result = append(result, name)
+				}
+			}
+		}
+	}
+
+	for _, pkg := range core.ResolveEnabledPackages(root) {
+		if !seen[pkg] {
+			seen[pkg] = true
+			result = append(result, pkg)
+		}
+	}
+	return result
+}
+
+func downloadAndExtractPackages(root, repo, tag string, packages []string, noCache bool) (map[string]string, error) {
+	packagesDir := filepath.Join(root, "packages")
+	if err := os.MkdirAll(packagesDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	sums, sumsErr := fetchReleaseSHA256Sums(repo, tag)
+	versions := make(map[string]string)
+
+	for _, pkg := range packages {
+		if err := validatePackageName(pkg); err != nil {
+			return nil, err
+		}
+		asset := fmt.Sprintf("dex-package-%s.tgz", pkg)
+		p, cache, err := core.GetTemplateTgzPath(repo, tag, asset, noCache)
+		if err != nil {
+			return nil, err
+		}
+		if sumsErr != nil && cache == "miss" {
+			return nil, fmt.Errorf("failed to fetch SHA256SUMS for %s@%s: %w", repo, tag, sumsErr)
+		}
+		if sums != nil {
+			expected, ok := sums[asset]
+			if !ok {
+				return nil, fmt.Errorf("asset %s not found in release SHA256SUMS", asset)
+			}
+			actual, err := core.ComputeFileSHA256(p)
+			if err != nil {
+				return nil, fmt.Errorf("failed to compute SHA-256 for %s: %w", asset, err)
+			}
+			if actual != expected {
+				return nil, fmt.Errorf("checksum verification failed for %s (expected %s, got %s)", asset, expected, actual)
+			}
+		} else if sumsErr == nil && sums == nil {
+			// If sums is explicitly non-nil or empty check: instruction says:
+			// "When sums != nil && len(sums) > 0, if asset is missing from sums, return an error..."
+		}
+		fmt.Printf("   package %s: %s (%s)\n", pkg, cache, asset)
+
+		outDir, err := core.SafeJoin(packagesDir, pkg)
+		if err != nil {
+			return nil, err
+		}
+		tmpExtract := filepath.Join(packagesDir, fmt.Sprintf(".tmp-%s-%d", pkg, os.Getpid()))
+		_ = os.RemoveAll(tmpExtract)
+		if err := core.ExtractTemplate(p, tmpExtract); err != nil {
+			_ = os.RemoveAll(tmpExtract)
+			return nil, err
+		}
+		if err := os.RemoveAll(outDir); err != nil {
+			_ = os.RemoveAll(tmpExtract)
+			return nil, err
+		}
+		if err := os.Rename(tmpExtract, outDir); err != nil {
+			_ = os.RemoveAll(tmpExtract)
+			return nil, err
+		}
+
+		pkgJSONPath := filepath.Join(outDir, "package.json")
+		if data, err := os.ReadFile(pkgJSONPath); err == nil {
+			var parsed struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			}
+			if json.Unmarshal(data, &parsed) == nil && parsed.Name != "" && parsed.Version != "" {
+				versions[parsed.Name] = parsed.Version
+			}
+		}
+	}
+
+	return versions, nil
+}
+
+func runBunInstall(root string) error {
+	return core.StepRun("Install dependencies (bun install)", func() error {
+		bunCmd, bunEnv := runner.ResolveBunCmd()
+		if _, err := exec.LookPath(bunCmd); err != nil {
+			return errors.New("bun not found in PATH (pass --no-install to skip)")
+		}
+		cmd := exec.Command(bunCmd, "install")
+		cmd.Dir = root
+		cmd.Env = bunEnv
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		return cmd.Run()
+	})
+}
+
+func writeFileIfMissing(path string, content string) error {
+	if fileExists(path) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func scaffoldMissingStarterFiles(root string, packages []string) error {
+	if slices.Contains(packages, "router") && !fileExists(filepath.Join(root, "web", "pages")) {
+		if err := writeFileIfMissing(filepath.Join(root, "web", "pages", "index.tsx"), `export const metadata = { title: 'Dex App' }
+
+export default function Page() {
+	return (
+		<main className="max-w-2xl mx-auto px-6 py-16 space-y-4">
+			<h1 className="text-3xl font-semibold">Dex App</h1>
+			<p>Edit web/pages/index.tsx to get started.</p>
+		</main>
+	)
+}
+`); err != nil {
+			return err
+		}
+		if err := writeFileIfMissing(filepath.Join(root, "web", "public", "index.html"), `<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Dex App</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<link rel="stylesheet" href="/assets/styles.css" />
+	</head>
+	<body>
+		<div id="root"></div>
+		<script>
+			(() => {
+				try {
+					const es = new EventSource('/__dev/reload')
+					let reloading = false
+					es.addEventListener('reload', () => {
+						if (reloading) return
+						reloading = true
+						location.reload()
+					})
+					es.onerror = () => {
+						try {
+							es.close()
+						} catch {}
+					}
+				} catch {}
+			})()
+		</script>
+		<script type="module" src="/assets/client.js"></script>
+	</body>
+</html>
+`); err != nil {
+			return err
+		}
+	}
+
+	if slices.Contains(packages, "server") && !fileExists(filepath.Join(root, "routes", "api")) {
+		if err := writeFileIfMissing(filepath.Join(root, "routes", "api", "index.ts"), `import { Elysia } from 'elysia'
+
+export const apiRoutes = () =>
+	new Elysia({ prefix: '/v1' }).get('/health', () => ({ ok: true }))
+`); err != nil {
+			return err
+		}
+	}
+
+	if slices.Contains(packages, "pie") && !fileExists(filepath.Join(root, "lib", "api.ts")) {
+		if err := writeFileIfMissing(filepath.Join(root, "lib", "api.ts"), `import { createPie } from '@dex/pie'
+import type { ApiRoutes } from '@core/api/generated'
+
+export const api = createPie<ApiRoutes>({
+	prefix: '/api',
+})
+`); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// CmdInstall reconciles enabled framework packages and missing starter files in an existing Dex project.
+func CmdInstall(args core.ParsedArgs) error {
 	if args.HasFlag("h", "help") {
 		fmt.Print(`
-Usage: dex sync [options]
+Usage: dex install [options]
 
-Sync files from upstream template release to update your project.
+Install enabled framework packages into packages/ and scaffold missing starter files.
 
 Options:
-  --tag <tag>         Target release tag to sync to (default: latest)
-  --interactive       Interactively select which changed files to sync
-  --force             Force sync even if project is already on the target version
+  --packages <list>   Comma-separated package list override (e.g. router,server)
+  --tag <tag>         Target release tag (default: .dex/metadata.json or latest)
   --repo <repo>       GitHub repo (default: patrickaigbogun/dex)
+  --no-install        Do not run bun install
+  --no-cache, --fresh Bypass local package cache
   -h, --help          Show help
 `)
 		return nil
@@ -463,7 +704,7 @@ Options:
 			return nil, err
 		}
 		if proj == nil {
-			return nil, errors.New("Not in a Dex project (missing dex.config.*)")
+			return nil, errors.New("Not in a Dex project (missing config/core/index.* or dex.config.*)")
 		}
 		return proj, nil
 	})
@@ -471,6 +712,232 @@ Options:
 		return err
 	}
 
+	var packages []string
+	if pkgOverride := args.GetFlag("packages"); pkgOverride != "" {
+		var err error
+		packages, err = parsePackageListFlag(pkgOverride)
+		if err != nil {
+			return err
+		}
+	} else {
+		packages = core.ResolveEnabledPackages(found.Root)
+		for _, p := range packages {
+			if err := validatePackageName(p); err != nil {
+				return err
+			}
+		}
+	}
+	if len(packages) == 0 {
+		return errors.New("no packages resolved for installation")
+	}
+
+	repo, err := resolvePackageRepo(args)
+	if err != nil {
+		return err
+	}
+
+	targetTag := args.GetFlag("tag", "packages-tag")
+	if targetTag == "" {
+		targetTag = os.Getenv("DEX_PACKAGE_TAG")
+	}
+	if targetTag == "" {
+		if meta, metaErr := core.GetTemplateMetadata(found.Root); metaErr == nil && meta != nil {
+			if meta.ReleaseTag != "" && meta.ReleaseTag != "unknown" {
+				targetTag = meta.ReleaseTag
+			} else if meta.Version != "" && meta.Version != "unknown" {
+				targetTag = meta.Version
+			}
+		}
+	}
+	if targetTag == "" || targetTag == "latest" {
+		targetTag, err = core.Step("Fetch latest release info", func() (string, error) {
+			rel, err := getLatestReleaseTag(repo)
+			if err != nil || rel == "" {
+				return "", fmt.Errorf("could not determine latest release tag for %s", repo)
+			}
+			return rel, nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	targetTag = normalizeVersionTag(targetTag)
+	if err := core.ValidateTag(targetTag); err != nil {
+		return err
+	}
+
+	noCache := args.HasFlag("no-cache", "fresh")
+	var versions map[string]string
+	if err := core.StepRun(fmt.Sprintf("Install framework packages (%s@%s)", repo, targetTag), func() error {
+		var err error
+		versions, err = downloadAndExtractPackages(found.Root, repo, targetTag, packages, noCache)
+		if err != nil {
+			return err
+		}
+		if err := writePackagesIndex(found.Root, packages); err != nil {
+			return err
+		}
+		updateProjectPackageJSON(found.Root, packages, versions, true)
+		return core.WriteDexMetadata(found.Root, targetTag, targetTag)
+	}); err != nil {
+		return err
+	}
+
+	if err := core.StepRun("Scaffold missing starter files", func() error {
+		return scaffoldMissingStarterFiles(found.Root, packages)
+	}); err != nil {
+		return err
+	}
+
+	if !args.HasFlag("no-install") {
+		if err := runBunInstall(found.Root); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("\nInstalled %d framework package(s) from %s@%s ✓\n", len(packages), repo, targetTag)
+	return nil
+}
+
+// CmdSync upgrades framework packages (default) or syncs upstream template diffs (--include-template).
+func CmdSync(args core.ParsedArgs) error {
+	if args.HasFlag("h", "help") {
+		fmt.Print(`
+Usage: dex sync [options]
+
+Upgrade framework packages in packages/ (default), or sync upstream template diffs (--include-template).
+
+Options:
+  --dry-run           Print packages that would be upgraded/added without modifying disk
+  --include-template  Also run upstream template file diff sync
+  --interactive       Interactively select template files to sync (with --include-template)
+  --tag <tag>         Target release tag to sync to (default: latest)
+  --force             Force sync even if project is already on the target version
+  --repo <repo>       GitHub repo (default: patrickaigbogun/dex)
+  --no-install        Do not run bun install
+  --no-cache, --fresh Bypass local cache
+  -h, --help          Show help
+`)
+		return nil
+	}
+
+	found, err := core.Step("Locate project", func() (*core.ProjectLocation, error) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		proj, err := core.FindProjectRoot(cwd)
+		if err != nil {
+			return nil, err
+		}
+		if proj == nil {
+			return nil, errors.New("Not in a Dex project (missing config/core/index.* or dex.config.*)")
+		}
+		return proj, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if !args.HasFlag("include-template") {
+		return syncPackagesOnly(found, args)
+	}
+
+	return syncWithTemplate(found, args)
+}
+
+func syncPackagesOnly(found *core.ProjectLocation, args core.ParsedArgs) error {
+	meta, err := core.GetTemplateMetadata(found.Root)
+	if err != nil {
+		return err
+	}
+	var currentTag string
+	if meta != nil {
+		currentTag = meta.Version
+		if currentTag == "" {
+			currentTag = meta.ReleaseTag
+		}
+	}
+
+	repo, err := resolvePackageRepo(args)
+	if err != nil {
+		return err
+	}
+
+	targetTag := args.GetFlag("tag", "to", "packages-tag")
+	if targetTag == "" {
+		targetTag = os.Getenv("DEX_PACKAGE_TAG")
+	}
+	if targetTag == "" || targetTag == "latest" {
+		targetTag, err = core.Step("Fetch latest release info", func() (string, error) {
+			rel, err := getLatestReleaseTag(repo)
+			if err != nil || rel == "" {
+				return "", fmt.Errorf("could not determine latest release tag for %s", repo)
+			}
+			return rel, nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	targetTag = normalizeVersionTag(targetTag)
+	if err := core.ValidateTag(targetTag); err != nil {
+		return err
+	}
+
+	packages := detectInstalledPackages(found.Root)
+	dryRun := args.HasFlag("dry-run")
+
+	if dryRun {
+		fromLabel := currentTag
+		if fromLabel == "" {
+			fromLabel = "untracked"
+		}
+		fmt.Printf("\nDry run: packages for %s (%s -> %s):\n", found.Root, fromLabel, targetTag)
+		for _, pkg := range packages {
+			pkgDir := filepath.Join(found.Root, "packages", pkg)
+			if fileExists(pkgDir) {
+				fmt.Printf("  - %s: %s -> %s (upgrade)\n", pkg, fromLabel, targetTag)
+			} else {
+				fmt.Printf("  - %s: (not installed) -> %s (add)\n", pkg, targetTag)
+			}
+		}
+		return nil
+	}
+
+	if currentTag == targetTag && !args.HasFlag("force") {
+		fmt.Printf("\nProject packages are already up to date with %s (latest) ✓\n", targetTag)
+		fmt.Println("Use `dex sync --force` to re-sync packages.")
+		return nil
+	}
+
+	noCache := args.HasFlag("no-cache", "fresh")
+	if err := core.StepRun(fmt.Sprintf("Upgrade framework packages (%s@%s)", repo, targetTag), func() error {
+		versions, err := downloadAndExtractPackages(found.Root, repo, targetTag, packages, noCache)
+		if err != nil {
+			return err
+		}
+		if err := writePackagesIndex(found.Root, packages); err != nil {
+			return err
+		}
+		updateProjectPackageJSON(found.Root, packages, versions, false)
+		return core.WriteDexMetadata(found.Root, targetTag, targetTag)
+	}); err != nil {
+		return err
+	}
+
+	if !args.HasFlag("no-install") {
+		if err := runBunInstall(found.Root); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("\nUpgraded %d package(s) from %s@%s ✓\n", len(packages), repo, targetTag)
+	return nil
+}
+
+func syncWithTemplate(found *core.ProjectLocation, args core.ParsedArgs) error {
 	cancelled := false
 	metadata, err := core.Step("Load template metadata", func() (*core.DexMetadata, error) {
 		meta, err := core.GetTemplateMetadata(found.Root)
@@ -511,7 +978,7 @@ Options:
 	targetTag := args.GetFlag("tag", "to")
 	if targetTag == "" || targetTag == "latest" {
 		targetTag, err = core.Step("Fetch latest release info", func() (string, error) {
-			rel, err := core.GetLatestReleaseTag(repo)
+			rel, err := getLatestReleaseTag(repo)
 			if err != nil || rel == "" {
 				return "", fmt.Errorf("could not determine latest release tag for %s", repo)
 			}
@@ -539,6 +1006,21 @@ Options:
 	})
 	if err != nil {
 		return err
+	}
+
+	if args.HasFlag("dry-run") {
+		fmt.Printf("\nDry run: template sync for %s (%s -> %s):\n", found.Root, currentTag, targetTag)
+		fmt.Println("Changed files:")
+		for _, f := range diff.ChangedFiles {
+			fmt.Printf("  - %s\n", f)
+		}
+		if len(diff.DeletedFiles) > 0 {
+			fmt.Println("Deleted files:")
+			for _, f := range diff.DeletedFiles {
+				fmt.Printf("  - %s\n", f)
+			}
+		}
+		return nil
 	}
 
 	var filesToSync []string
@@ -646,6 +1128,24 @@ Options:
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	if fileExists(filepath.Join(found.Root, "packages")) {
+		packages := detectInstalledPackages(found.Root)
+		noCache := args.HasFlag("no-cache", "fresh")
+		if err := core.StepRun(fmt.Sprintf("Upgrade framework packages (%s@%s)", repo, targetTag), func() error {
+			versions, err := downloadAndExtractPackages(found.Root, repo, targetTag, packages, noCache)
+			if err != nil {
+				return err
+			}
+			if err := writePackagesIndex(found.Root, packages); err != nil {
+				return err
+			}
+			updateProjectPackageJSON(found.Root, packages, versions, false)
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	if err := core.StepRun("Update metadata", func() error {

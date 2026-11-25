@@ -15,16 +15,18 @@ import (
 )
 
 // Version is set at compile time via -ldflags="-X main.Version=vX.Y.Z"
-var Version = "0.4.0"
+var Version = "0.5.0"
 
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `dex
 
 Usage:
   dex scaffold <dir>
-  dex sync [--interactive]
+  dex install [--packages <list>] [--tag <tag>] [--no-install]
+  dex sync [--dry-run] [--include-template] [--interactive]
   dex template <list|cache|diff>
   dex update [version] [--force]
+  dex prune
   dex versions | dex list
   dex use <version>
   dex tag <patch|minor|major>
@@ -52,11 +54,21 @@ Scaffold options:
   --no-install               Do not run bun install
   --no-cache, --fresh        Bypass local template cache
 
+Install options:
+  --packages <list>          Comma-separated packages override (default: resolved from config/core/)
+  --tag <tag|latest>         Release tag (default: .dex/metadata.json or latest)
+  --repo <owner/repo>        GitHub repo containing dex-package-*.tgz assets
+  --no-install               Do not run bun install
+  --no-cache, --fresh        Bypass local package cache
+
 Sync options:
-  --interactive              Interactively select files to sync (default: all)
-  --repo <owner/repo>        Template repo (default from .dex/metadata.json)
+  --dry-run                  Print packages that would be upgraded/added without modifying disk
+  --include-template         Also sync upstream template file diffs
+  --interactive              Interactively select template files to sync (with --include-template)
+  --repo <owner/repo>        Template/package repo (default from .dex/metadata.json)
   --tag <tag>                Release tag (default: latest)
   --force                    Force sync even if project is already on target version
+  --no-install               Do not run bun install
   --no-cache, --fresh        Bypass local template cache
 
 Template options:
@@ -207,7 +219,7 @@ func run(argv []string) error {
 	}
 
 	if cmd == "" || cmd == "-h" || cmd == "--help" || cmd == "help" || args.HasFlag("h", "help") {
-		if cmd != "sync" {
+		if cmd != "sync" && cmd != "install" {
 			printUsage(os.Stdout)
 			return nil
 		}
@@ -235,6 +247,9 @@ func run(argv []string) error {
 			core.DownloadToFile,
 		)
 
+	case "prune":
+		return version.CmdPrune()
+
 	case "versions", "list", "ls":
 		return version.CmdVersions()
 
@@ -251,6 +266,9 @@ func run(argv []string) error {
 			return errors.New("missing destination directory for scaffold")
 		}
 		return scaffold.CmdScaffold(args.Positional[1], args)
+
+	case "install":
+		return scaffold.CmdInstall(args)
 
 	case "sync":
 		return scaffold.CmdSync(args)

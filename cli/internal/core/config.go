@@ -38,9 +38,13 @@ type DexMetadata struct {
 }
 
 // DefaultPackages lists the default framework packages bundled into scaffolded projects.
-var DefaultPackages = []string{"router", "server", "dev", "pie"}
+var DefaultPackages = []string{"core", "router", "server", "dev", "pie", "validation"}
 
 var configCandidates = []string{
+	filepath.Join("config", "core", "index.ts"),
+	filepath.Join("config", "core", "index.js"),
+	filepath.Join("config", "core", "index.mjs"),
+	filepath.Join("config", "core", "index.json"),
 	"dex.config.ts",
 	"dex.config.js",
 	"dex.config.mjs",
@@ -49,6 +53,49 @@ var configCandidates = []string{
 	filepath.Join("config", "dex.config.js"),
 	filepath.Join("config", "dex.config.mjs"),
 	filepath.Join("config", "dex.config.json"),
+}
+
+func hasConfigVariant(dir, base string) bool {
+	for _, ext := range []string{".ts", ".js", ".mjs", ".json"} {
+		p := filepath.Join(dir, base+ext)
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveEnabledPackages inspects config/core/ split config files in root and returns
+// the enabled framework packages. Always includes "core". If no split config files exist
+// (e.g. legacy dex.config.ts), returns DefaultPackages.
+func ResolveEnabledPackages(root string) []string {
+	coreConfigDir := filepath.Join(root, "config", "core")
+	mapping := []struct {
+		configName string
+		pkgName    string
+	}{
+		{"router", "router"},
+		{"server", "server"},
+		{"build", "dev"},
+		{"api", "pie"},
+		{"validation", "validation"},
+	}
+
+	pkgs := []string{"core"}
+	foundAnySplit := false
+	for _, m := range mapping {
+		if hasConfigVariant(coreConfigDir, m.configName) {
+			foundAnySplit = true
+			pkgs = append(pkgs, m.pkgName)
+		}
+	}
+
+	if !foundAnySplit {
+		out := make([]string, len(DefaultPackages))
+		copy(out, DefaultPackages)
+		return out
+	}
+	return pkgs
 }
 
 // FindProjectRoot walks up from startDir looking for a Dex config file or package.json with a "dex" field.

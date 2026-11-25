@@ -205,6 +205,8 @@ func CmdVersion(cliVersion string, showTemplate bool, cwd string) error {
 	return nil
 }
 
+var fetchReleaseSHA256Sums = core.FetchReleaseSHA256Sums
+
 func CmdUpdate(
 	targetTag string,
 	repo string,
@@ -273,6 +275,28 @@ func CmdUpdate(
 		return fmt.Errorf("failed to download release asset from %s: %w", downloadURL, err)
 	}
 
+	sums, err := fetchReleaseSHA256Sums(repo, targetTag)
+	if err != nil {
+		_ = os.Remove(tmpFile)
+		return fmt.Errorf("failed to fetch SHA256SUMS for %s@%s: %w", repo, targetTag, err)
+	}
+	if sums != nil {
+		expected, ok := sums[asset]
+		if !ok {
+			_ = os.Remove(tmpFile)
+			return fmt.Errorf("asset %s not found in release SHA256SUMS", asset)
+		}
+		actual, err := core.ComputeFileSHA256(tmpFile)
+		if err != nil {
+			_ = os.Remove(tmpFile)
+			return fmt.Errorf("failed to compute SHA-256 for %s: %w", asset, err)
+		}
+		if actual != expected {
+			_ = os.Remove(tmpFile)
+			return fmt.Errorf("checksum verification failed for %s (expected %s, got %s)", asset, expected, actual)
+		}
+	}
+
 	if err := os.Rename(tmpFile, destBinary); err != nil {
 		_ = os.Remove(tmpFile)
 		return err
@@ -288,6 +312,86 @@ func CmdUpdate(
 
 	fmt.Printf("\nSuccessfully updated Dex to %s in %s ✓\n", targetTag, dexHome)
 	fmt.Printf("Active binary: %s\n", filepath.Join(dexHome, "bin", fmt.Sprintf("dex%s", ext)))
+	return nil
+}
+
+// CmdPrune removes all inactive Dex version directories in ~/.dex/versions/, keeping the active version.
+func CmdPrune() error {
+	dexHome := GetDexHome()
+	versionsDir := filepath.Join(dexHome, "versions")
+	resolvedVersionsDir, err := filepath.EvalSymlinks(versionsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("Removed 0 inactive versions (no versions directory in %s)\n", dexHome)
+			return nil
+		}
+		resolvedVersionsDir = versionsDir
+	}
+
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("Removed 0 inactive versions (no versions directory in %s)\n", dexHome)
+			return nil
+		}
+		return err
+	}
+
+	var activeVersion string
+	currentLink := filepath.Join(dexHome, "current")
+	resolvedCurrent, err := filepath.EvalSymlinks(currentLink)
+	if err == nil {
+		if filepath.Dir(resolvedCurrent) == resolvedVersionsDir {
+			activeVersion = filepath.Base(resolvedCurrent)
+		} else {
+			return fmt.Errorf("refusing to prune: resolved current link %s is not within versions directory %s", resolvedCurrent, resolvedVersionsDir)
+		}
+	} else if target, err := os.Readlink(currentLink); err == nil {
+		// fallback if eval symlinks failed but readlink works
+		absTarget := target
+		if !filepath.IsAbs(absTarget) {
+			absTarget = filepath.Join(filepath.Dir(currentLink), target)
+		}
+		resolvedTarget, err := filepath.EvalSymlinks(absTarget)
+		if err == nil && filepath.Dir(resolvedTarget) == resolvedVersionsDir {
+			activeVersion = filepath.Base(resolvedTarget)
+		} else {
+			return fmt.Errorf("refusing to prune: active version path %s is invalid or outside versions dir", absTarget)
+		}
+	}
+
+	if activeVersion == "" {
+		return fmt.Errorf("cannot determine active version from %s; refusing to prune all versions", currentLink)
+	}
+
+	// Verify activeVersion matches an actual entry in versionsDir
+	foundActive := false
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() == activeVersion {
+			foundActive = true
+			break
+		}
+	}
+	if !foundActive {
+		return fmt.Errorf("refusing to prune: active version %s does not exist in versions directory", activeVersion)
+	}
+
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		v := entry.Name()
+		if v == activeVersion {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(versionsDir, v)); err != nil {
+			return err
+		}
+		removed++
+	}
+
+	fmt.Printf("Removed %d inactive version(s) from %s (kept %s) ✓\n", removed, versionsDir, activeVersion)
 	return nil
 }
 

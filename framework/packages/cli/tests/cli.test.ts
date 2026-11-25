@@ -1,10 +1,25 @@
 import { test, expect, describe } from 'bun:test'
-import { parseArgs, parseSemverLikeTag, compareSemver, bumpSemver, formatSemverTag, cachePathForTemplate, validateTag, safeJoin } from '../src/cli'
+import {
+	parseArgs,
+	parseSemverLikeTag,
+	compareSemver,
+	bumpSemver,
+	formatSemverTag,
+	cachePathForTemplate,
+	validateTag,
+	safeJoin,
+	DEFAULT_PACKAGES,
+	findProjectRoot,
+	resolveEnabledPackages,
+	parseSHA256Sums,
+} from '../src/cli'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 describe('CLI utilities', () => {
 	test('parseArgs correctly handles boolean flags and positional arguments', () => {
-		const argv = ['scaffold', 'my-app', '--no-cache', '--fresh', '--all', '--force', '--interactive', '--no-install', '-p', '-v', '-f', '--repo', 'owner/repo', 'extra']
+		const argv = ['scaffold', 'my-app', '--no-cache', '--fresh', '--all', '--force', '--interactive', '--no-install', '--dry-run', '--include-template', '-p', '-v', '-f', '--repo', 'owner/repo', 'extra']
 		const res = parseArgs(argv)
 		expect(res.positional).toEqual(['scaffold', 'my-app', 'extra'])
 		expect(res.flags['no-cache']).toBe(true)
@@ -13,10 +28,45 @@ describe('CLI utilities', () => {
 		expect(res.flags['force']).toBe(true)
 		expect(res.flags['interactive']).toBe(true)
 		expect(res.flags['no-install']).toBe(true)
+		expect(res.flags['dry-run']).toBe(true)
+		expect(res.flags['include-template']).toBe(true)
 		expect(res.flags['p']).toBe(true)
 		expect(res.flags['v']).toBe(true)
 		expect(res.flags['f']).toBe(true)
 		expect(res.flags['repo']).toBe('owner/repo')
+	})
+
+	test('DEFAULT_PACKAGES includes core and validation', () => {
+		expect(DEFAULT_PACKAGES).toEqual(['core', 'router', 'server', 'dev', 'pie', 'validation'])
+	})
+
+	test('findProjectRoot prefers config/core/index.ts and resolveEnabledPackages resolves split configs', async () => {
+		const root = mkdtempSync(path.join(os.tmpdir(), 'dex-cli-test-'))
+		try {
+			const coreDir = path.join(root, 'config', 'core')
+			mkdirSync(coreDir, { recursive: true })
+			writeFileSync(path.join(coreDir, 'index.ts'), 'export default {}\n')
+			writeFileSync(path.join(coreDir, 'router.ts'), 'export default {}\n')
+			writeFileSync(path.join(coreDir, 'server.ts'), 'export default {}\n')
+			writeFileSync(path.join(root, 'dex.config.ts'), 'export default {}\n')
+
+			const nested = path.join(root, 'web', 'pages')
+			mkdirSync(nested, { recursive: true })
+
+			const found = await findProjectRoot(nested)
+			expect(found?.root).toBe(root)
+			expect(found?.configPath).toBe(path.join(coreDir, 'index.ts'))
+			expect(resolveEnabledPackages(root)).toEqual(['core', 'router', 'server'])
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	test('parseSHA256Sums parses valid lines', () => {
+		const sums = parseSHA256Sums(
+			'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90  dex-package-core.tgz\n'
+		)
+		expect(sums['dex-package-core.tgz']).toBe('a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90')
 	})
 
 	test('Semver parsing, comparison, bumping and formatting', () => {

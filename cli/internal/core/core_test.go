@@ -369,3 +369,60 @@ func TestGitHubTokenScoping(t *testing.T) {
 		t.Fatalf("expected Authorization header NOT to be sent to %s, got %q", srv.URL, gotAuth)
 	}
 }
+
+func TestFindProjectRoot_PrefersConfigCoreIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+	coreDir := filepath.Join(tmpDir, "config", "core")
+	if err := os.MkdirAll(coreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(coreDir, "index.ts")
+	if err := os.WriteFile(indexPath, []byte("export default {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Also place a legacy dex.config.ts to verify config/core/index.ts wins
+	if err := os.WriteFile(filepath.Join(tmpDir, "dex.config.ts"), []byte("export default {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	subDir := filepath.Join(tmpDir, "web", "pages")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loc, err := FindProjectRoot(subDir)
+	if err != nil {
+		t.Fatalf("FindProjectRoot failed: %v", err)
+	}
+	if loc == nil || loc.Root != tmpDir || loc.ConfigPath != indexPath {
+		t.Fatalf("FindProjectRoot = %+v, want root=%s config=%s", loc, tmpDir, indexPath)
+	}
+}
+
+func TestParseSHA256Sums(t *testing.T) {
+	raw := `
+# comment line
+a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90  dex-package-core.tgz
+00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF *./dex-linux-x64
+badhash  ignored.tgz
+`
+	sums := ParseSHA256Sums(raw)
+	if len(sums) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %v", len(sums), sums)
+	}
+	if sums["dex-package-core.tgz"] != "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90" {
+		t.Fatalf("unexpected hash for core: %s", sums["dex-package-core.tgz"])
+	}
+	if sums["dex-linux-x64"] != "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" {
+		t.Fatalf("unexpected hash for binary: %s", sums["dex-linux-x64"])
+	}
+}
+
+func TestParseArgs_NewBoolFlags(t *testing.T) {
+	args := ParseArgs([]string{"sync", "--dry-run", "--include-template", "--tag", "v0.3.0"})
+	if !args.HasFlag("dry-run") || !args.HasFlag("include-template") {
+		t.Fatalf("expected dry-run and include-template bool flags")
+	}
+	if args.GetFlag("tag") != "v0.3.0" {
+		t.Fatalf("expected tag=v0.3.0, got %q", args.GetFlag("tag"))
+	}
+}

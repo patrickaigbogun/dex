@@ -11,6 +11,8 @@
     "start": "dex start -p"
   },
   "dependencies": {
+    "@dex/core": "workspace:*",
+    "@dex/validation": "workspace:*",
     "@dex/router": "workspace:*",
     "@dex/pie": "workspace:*",
     "@dex/server": "workspace:*",

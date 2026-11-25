@@ -1,2 +1,0 @@
-import '../runtime/server/prod'
-

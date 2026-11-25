@@ -9,7 +9,7 @@
 - [x] **Improved Benchmarking Suite & Performance Baselines** — route generation, SSG throughput, bundle size budgets, router matching, SSE scaling, watcher memory, CLI latency (CI regression gate active)
 - [x] **Deployments & Vercel Compatibility** — Vercel Build Output API v3 adapter + automated deployment contract test suite, Netlify / Cloudflare / Railway / Render, `dex deploy`, official Docker support
 - [x] **Developer Experience, Validation & Templates** — `@dex/validation` (Standard Schema + built-in `v.*` + Elysia/React helpers), file watcher improvements (`--no-watch`, structured errors), curated real-world templates (`docker`, `fullstack-typed-api`, `with-validation`, `with-auth`, `with-database`, `ssg`)
-- [ ] **Core Modularity & Composable Package Architecture** — move `core/` out of userland into opt-in packages so apps compose only what they need, plus plugin/hook system & >80% coverage
+- [x] **Core Modularity & Composable Package Architecture** — `@dex/core` replacing userland `core/`, flat `config/core/` composition, `dex install` reconciler, safe package-only `dex sync`, `dex prune`, `DexPlugin` hooks
 - [ ] **Documentation Redesign & Guides** — full docs overhaul, architecture deep dives, deployment & plugin authoring guides
 
 ---
@@ -102,17 +102,21 @@
 
 ---
 
-## Phase D (Final Milestone for v0.5): Core Modularity & Composable Package Architecture
+## Phase D (Complete — v0.5.0): Core Modularity & Composable Package Architecture
 
-> **The defining goal of Dex:** Move what currently lives in userland `core/` (`core/bootstrap/*`, `core/runtime/*`, `core/router/.generated/*`) into composable, opt-in packages so developers can assemble an app with only the pieces they want — without needing every package installed.
+> **The defining goal of Dex:** Move what previously lived in userland `core/` (`core/bootstrap/*`, `core/runtime/*`, `core/router/.generated/*`) into `@dex/core`, compose the framework declaratively in `config/core/`, and keep `packages/` clean and upgradeable.
 
-### Moving `core/` Out of Userland
-- [ ] Design the minimal kernel (`@dex/core`) vs opt-in feature packages (`@dex/router`, `@dex/server`, `@dex/dev`, `@dex/pie`, `@dex/validation`)
-- [ ] Define clear package boundaries so users can run:
-  - API-only apps (`@dex/server` without `@dex/router`)
-  - Pure SPA/SSG frontends (`@dex/router` + `@dex/pie` without Elysia)
-  - Full-stack apps composing all packages via thin `dex.config.ts` presets
-- [ ] Shrink templates to thin, clean userland blueprints (no vendored `core/bootstrap/` boilerplate)
+### Moving `core/` Out of Userland & Config-as-Composition
+- [x] Build `@dex/core` package replacing userland `core/bootstrap/*` and `core/runtime/*`; move generated files to `.dex/generated/`
+- [x] Move framework configuration to `config/core/` (flat `index.ts` exporting `router.ts`, `server.ts`, `api.ts`, `build.ts`; `core/` is the only subfolder in `config/`, with app configs flat in `config/`)
+- [x] Add `dex install` reconciler — reads `config/core/`, installs only enabled `@dex/*` packages, and scaffolds missing userland folders (`web/`, `routes/`, `lib/`) without overwriting existing files
+- [x] Upgrade `dex sync` to safe package-only upgrades by default (`--dry-run`, multi-version jump safe, `SHA256SUMS` verification, `--include-template` opt-in) + `SHA256SUMS`-verified `dex update` and `dex prune`
+- [x] Define clear package boundaries so users can run:
+  - API-only apps (`@dex/core` + `@dex/server` without `@dex/router`)
+  - Pure SPA/SSG frontends (`@dex/core` + `@dex/router` + `@dex/pie` without Elysia)
+  - Full-stack apps composing all packages via `config/core/`
+- [x] Remove userland `core/` from templates (`templates/starter`, `templates/spa`)
+- [x] Lightweight `DexPlugin` lifecycle hooks (`onGenerate`, `onBeforeBuild`, `onAfterBuild`, `onServer`) in `@dex/core`
 
 ### Plugin Architecture & Extensibility
 - [ ] Design plugin/hook interface for:

@@ -160,11 +160,16 @@ func RunCommand(cmd string, args []string, cwd string, extraEnv map[string]strin
 	return c.Wait()
 }
 
-// CmdBuild runs the project build via core/bootstrap/build.ts, core/bootstrap/scripts.ts, or `bun run build`.
+// CmdBuild runs the project build via core/bootstrap/build.ts, @dex/core/build, core/bootstrap/scripts.ts, or `bun run build`.
 func CmdBuild(projectRoot string) error {
 	buildTS := filepath.Join(projectRoot, "core", "bootstrap", "build.ts")
 	if fileExists(buildTS) {
 		return RunCommand("bun", []string{"core/bootstrap/build.ts"}, projectRoot, nil)
+	}
+
+	coreBuildTS := filepath.Join(projectRoot, "packages", "core", "src", "build.ts")
+	if fileExists(coreBuildTS) {
+		return RunCommand("bun", []string{"-e", "import { runBuild } from '@dex/core/build'; await runBuild()"}, projectRoot, nil)
 	}
 
 	scriptsTS := filepath.Join(projectRoot, "core", "bootstrap", "scripts.ts")
@@ -202,6 +207,11 @@ func CmdStart(projectRoot string, prod bool, configuredPort int) error {
 	devTS := filepath.Join(projectRoot, "core", "bootstrap", "dev.ts")
 	if fileExists(devTS) {
 		return RunCommand("bun", []string{"core/bootstrap/dev.ts"}, projectRoot, extraEnv)
+	}
+
+	coreDevTS := filepath.Join(projectRoot, "packages", "core", "src", "dev.ts")
+	if fileExists(coreDevTS) {
+		return RunCommand("bun", []string{"-e", "import { runDev } from '@dex/core/dev'; await runDev()"}, projectRoot, extraEnv)
 	}
 
 	scriptsTS := filepath.Join(projectRoot, "core", "bootstrap", "scripts.ts")

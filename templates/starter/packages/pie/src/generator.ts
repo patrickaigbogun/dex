@@ -4,7 +4,7 @@ import path from 'node:path'
 export type GenerateApiOptions = {
 	/** URL or local file path to OpenAPI specification (JSON or YAML) */
 	spec: string | object
-	/** Output file path. Defaults to 'core/api/generated.ts' */
+	/** Output file path. Defaults to '.dex/generated/api.ts' */
 	outTs?: string
 	/** Root directory for path resolution */
 	root?: string
@@ -376,7 +376,7 @@ export async function generateApi(options: GenerateApiOptions): Promise<string> 
 	const root = options.root || process.cwd()
 	const spec = await fetchOrReadSpec(options.spec, root)
 	const prefix = options.prefix ?? '/api'
-	const outTs = options.outTs ? (path.isAbsolute(options.outTs) ? options.outTs : path.resolve(root, options.outTs)) : path.resolve(root, 'core/api/generated.ts')
+	const outTs = options.outTs ? (path.isAbsolute(options.outTs) ? options.outTs : path.resolve(root, options.outTs)) : path.resolve(root, '.dex/generated/api.ts')
 
 	const schemasTs = generateComponentSchemas(spec.components)
 	const treeRoot = buildRouteTree(spec, prefix)

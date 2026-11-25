@@ -26,13 +26,13 @@ describe('Vercel Build Output API v3 adapter', () => {
 					},
 				})
 
-				// Ensure workspace packages exist when starter omits embedded packages/
+				// Ensure all workspace packages exist in tmpDir/packages/
 				const packagesDir = path.join(tmpDir, 'packages')
-				if (!existsSync(packagesDir)) {
-					await mkdir(packagesDir, { recursive: true })
-					for (const pkgName of ['router', 'server', 'pie', 'dev']) {
+				await mkdir(packagesDir, { recursive: true })
+				for (const pkgName of ['core', 'router', 'server', 'pie', 'dev', 'validation']) {
+					const dstPkg = path.join(packagesDir, pkgName)
+					if (!existsSync(dstPkg)) {
 						const srcPkg = path.join(FRAMEWORK_PACKAGES_DIR, pkgName)
-						const dstPkg = path.join(packagesDir, pkgName)
 						await cp(srcPkg, dstPkg, {
 							recursive: true,
 							filter: (src) => {

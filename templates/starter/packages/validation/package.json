@@ -1,0 +1,36 @@
+{
+  "name": "@dex/validation",
+  "version": "0.5.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./types/client.d.ts",
+      "default": "./src/client.ts"
+    }
+  },
+  "files": [
+    "src",
+    "types"
+  ],
+  "peerDependencies": {
+    "@dex/router": "^0.5.0",
+    "elysia": "^1.4.21",
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@dex/router": {
+      "optional": true
+    },
+    "elysia": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}

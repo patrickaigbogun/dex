@@ -143,7 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
-          for pkg in router server dev pie validation; do
+          for pkg in core router server dev pie validation; do
             tar -czf "../dist/dex-package-${pkg}.tgz" -C packages "${pkg}"
           done
         working-directory: framework

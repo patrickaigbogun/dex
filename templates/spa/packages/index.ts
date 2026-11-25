@@ -1,4 +1,6 @@
+export * from './core/src/index'
 export * from './router/src/index'
 export * from './server/src/index'
 export * from './dev/src/index'
 export * from './pie/src/index'
+export * from './validation/src/index'

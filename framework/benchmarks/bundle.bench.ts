@@ -53,12 +53,12 @@ export async function runBundleBench(): Promise<BundleBenchResult> {
 
 		await generateFsRoutes({
 			pagesDir: path.join(tmp, 'web/pages'),
-			outTs: path.join(tmp, 'core/router/.generated/routes.ts'),
-			outJson: path.join(tmp, 'core/router/.generated/manifest.json'),
+			outTs: path.join(tmp, '.dex/generated/routes.ts'),
+			outJson: path.join(tmp, '.dex/generated/manifest.json'),
 		})
 		await generateLayouts({
 			layoutsDir: path.join(tmp, 'web/layouts'),
-			outTs: path.join(tmp, 'core/router/.generated/layouts.ts'),
+			outTs: path.join(tmp, '.dex/generated/layouts.ts'),
 		})
 		await dexPrepareBuild({ rootDir: tmp })
 

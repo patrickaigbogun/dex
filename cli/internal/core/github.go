@@ -247,6 +247,62 @@ func FetchTemplateDiff(repo, tag string) (*TemplateDiff, error) {
 	return &diff, nil
 }
 
+var sha256HexRe = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
+// ParseSHA256Sums parses a SHA256SUMS file (<64-hex-hash>  <filename>) into a filename -> hash map.
+func ParseSHA256Sums(content string) map[string]string {
+	sums := make(map[string]string)
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			continue
+		}
+		hash := strings.ToLower(fields[0])
+		if !sha256HexRe.MatchString(hash) {
+			continue
+		}
+		name := strings.TrimPrefix(fields[1], "*")
+		name = strings.TrimPrefix(name, "./")
+		if name != "" {
+			sums[name] = hash
+		}
+	}
+	return sums
+}
+
+// FetchReleaseSHA256Sums downloads and parses SHA256SUMS for a release tag.
+// Returns (nil, nil) on 404 so older releases without SHA256SUMS still work cleanly.
+func FetchReleaseSHA256Sums(repo, tag string) (map[string]string, error) {
+	if err := ValidateTag(tag); err != nil {
+		return nil, err
+	}
+	escapedTag := url.PathEscape(tag)
+	reqURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", repo, escapedTag)
+
+	resp, err := doRequestWithTimeout(reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("failed to fetch SHA256SUMS (%d): %s", resp.StatusCode, reqURL)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJSONResponseBytes))
+	if err != nil {
+		return nil, err
+	}
+	return ParseSHA256Sums(string(body)), nil
+}
+
 // DownloadToFile streams a remote URL to filePath while reporting progress.
 func DownloadToFile(downloadURL, filePath string) error {
 	fmt.Printf("   downloading: %s\n", downloadURL)

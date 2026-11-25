@@ -14,7 +14,8 @@
     // "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
-      "@core/*": ["./core/*"]
+      "@dex/generated/*": ["./.dex/generated/*"],
+      "@config/*": ["./config/*"]
     }
   },
   "include": [

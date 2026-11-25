@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rm, copyFile, readFile, writeFile, cp as fsCp, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
 
@@ -309,6 +310,225 @@ export type DexTaskOptions = {
 	noWatch?: boolean
 }
 
+export type ResolvedProjectPaths = {
+	isLegacy: boolean
+	clientEntry: string
+	outRoutesTs: string
+	outRoutesJson: string
+	outLayoutsTs: string
+	serverDevEntry: string
+	serverProdEntry: string
+}
+
+const CONFIG_CANDIDATES = [
+	'config/core/index.ts',
+	'config/core/index.js',
+	'config/core/index.mjs',
+	'config/core/index.json',
+	'dex.config.ts',
+	'dex.config.js',
+	'dex.config.mjs',
+	'dex.config.json',
+	'dex.config.cjs',
+	'config/dex.config.ts',
+	'config/dex.config.js',
+	'config/dex.config.mjs',
+	'config/dex.config.json',
+	'config/dex.config.cjs',
+] as const
+
+async function loadDevProjectConfig(rootDir: string): Promise<Record<string, any>> {
+	for (const rel of CONFIG_CANDIDATES) {
+		const candidate = path.join(rootDir, rel)
+		if (!existsSync(candidate)) continue
+		try {
+			if (candidate.endsWith('.json')) {
+				return JSON.parse(readFileSync(candidate, 'utf8')) ?? {}
+			}
+			const mod: any = await import(`${pathToFileURL(candidate).href}?t=${Date.now()}`)
+			return mod?.default ?? mod?.dexConfig ?? mod?.config ?? mod ?? {}
+		} catch {
+			return {}
+		}
+	}
+	return {}
+}
+
+function resolveCoreServerEntry(rootDir: string, filename: 'server-dev.ts' | 'server-prod.ts'): string {
+	const nodeModulesCandidate = path.join(rootDir, 'node_modules', '@dex', 'core', 'src', filename)
+	if (existsSync(nodeModulesCandidate)) {
+		return path.posix.join('node_modules', '@dex', 'core', 'src', filename)
+	}
+	const workspaceCandidate = path.join(rootDir, 'packages', 'core', 'src', filename)
+	if (existsSync(workspaceCandidate)) {
+		return path.posix.join('packages', 'core', 'src', filename)
+	}
+	const monorepoCandidate = path.resolve(import.meta.dir, '../../core/src', filename)
+	if (existsSync(monorepoCandidate)) {
+		return monorepoCandidate
+	}
+	return `@dex/core/${filename.replace(/\.ts$/, '')}`
+}
+
+/**
+ * Resolve project entrypoints and generated artifact paths, preserving legacy `core/` compatibility.
+ */
+export function resolveProjectPaths(rootDir: string): ResolvedProjectPaths {
+	const resolvedRoot = path.resolve(rootDir)
+	const isLegacy = existsSync(path.join(resolvedRoot, 'core', 'bootstrap', 'web.tsx'))
+
+	if (isLegacy) {
+		return {
+			isLegacy: true,
+			clientEntry: 'core/bootstrap/web.tsx',
+			outRoutesTs: 'core/router/.generated/routes.ts',
+			outRoutesJson: 'core/router/.generated/manifest.json',
+			outLayoutsTs: 'core/router/.generated/layouts.ts',
+			serverDevEntry: 'core/runtime/app/index.ts',
+			serverProdEntry: 'core/runtime/server/prod.ts',
+		}
+	}
+
+	return {
+		isLegacy: false,
+		clientEntry: '.dex/generated/client-entry.tsx',
+		outRoutesTs: '.dex/generated/routes.ts',
+		outRoutesJson: '.dex/generated/manifest.json',
+		outLayoutsTs: '.dex/generated/layouts.ts',
+		serverDevEntry: resolveCoreServerEntry(resolvedRoot, 'server-dev.ts'),
+		serverProdEntry: resolveCoreServerEntry(resolvedRoot, 'server-prod.ts'),
+	}
+}
+
+function resolveCoreWebSpecifier(rootDir: string): string {
+	try {
+		Bun.resolveSync('@dex/core/web', rootDir)
+		return '@dex/core/web'
+	} catch {
+		const monorepoWeb = path.resolve(import.meta.dir, '../../core/src/web.tsx')
+		if (existsSync(monorepoWeb)) {
+			return monorepoWeb.split(path.sep).join('/')
+		}
+		return '@dex/core/web'
+	}
+}
+
+const API_ENTRY_CANDIDATES = [
+	'routes/api/index.ts',
+	'routes/api/index.js',
+	'routes/api.ts',
+	'routes/api.js',
+] as const
+
+function resolveCoreServerProdSpecifier(rootDir: string, fromDir: string): string {
+	try {
+		Bun.resolveSync('@dex/core/server-prod', rootDir)
+		return '@dex/core/server-prod'
+	} catch {
+		const abs = path.resolve(rootDir, resolveCoreServerEntry(rootDir, 'server-prod.ts'))
+		if (existsSync(abs)) {
+			const rel = path.relative(fromDir, abs).split(path.sep).join('/')
+			return rel.startsWith('.') ? rel : `./${rel}`
+		}
+		return '@dex/core/server-prod'
+	}
+}
+
+async function ensureGeneratedProdServerEntry(rootDir: string): Promise<string> {
+	const entryRel = '.dex/generated/prod-server-entry.ts'
+	const entryAbs = path.join(rootDir, entryRel)
+	const entryDir = path.dirname(entryAbs)
+	await mkdir(entryDir, { recursive: true })
+
+	const serverProdSpecifier = resolveCoreServerProdSpecifier(rootDir, entryDir)
+
+	let configRel: string | null = null
+	for (const rel of CONFIG_CANDIDATES) {
+		if (existsSync(path.join(rootDir, rel))) {
+			configRel = path.relative(entryDir, path.join(rootDir, rel)).split(path.sep).join('/')
+			if (!configRel.startsWith('.')) configRel = `./${configRel}`
+			break
+		}
+	}
+
+	let apiRel: string | null = null
+	for (const rel of API_ENTRY_CANDIDATES) {
+		if (existsSync(path.join(rootDir, rel))) {
+			apiRel = path.relative(entryDir, path.join(rootDir, rel)).split(path.sep).join('/')
+			if (!apiRel.startsWith('.')) apiRel = `./${apiRel}`
+			break
+		}
+	}
+
+	const lines: string[] = [
+		`/* eslint-disable */`,
+		`// AUTO-GENERATED BY @dex/dev. DO NOT EDIT.`,
+		`import { startProdServer } from ${JSON.stringify(serverProdSpecifier)}`,
+	]
+
+	if (configRel) {
+		if (configRel.endsWith('.json')) {
+			lines.push(`import config from ${JSON.stringify(configRel)}`)
+		} else {
+			lines.push(`import * as configMod from ${JSON.stringify(configRel)}`)
+			lines.push(
+				`const config = (configMod as any)?.default ?? (configMod as any)?.dexConfig ?? (configMod as any)?.config ?? configMod`
+			)
+		}
+	} else {
+		lines.push(`const config = undefined`)
+	}
+
+	if (apiRel) {
+		lines.push(`import * as apiModule from ${JSON.stringify(apiRel)}`)
+	} else {
+		lines.push(`const apiModule = undefined`)
+	}
+
+	lines.push(``)
+	lines.push(`await startProdServer({ config, apiModule })`)
+	lines.push(``)
+
+	await writeFile(entryAbs, lines.join('\n'), 'utf8')
+	return entryRel
+}
+
+async function ensureGeneratedClientEntry(rootDir: string, paths: ResolvedProjectPaths): Promise<void> {
+	if (paths.isLegacy) return
+
+	const entryAbs = path.join(rootDir, paths.clientEntry)
+	await mkdir(path.dirname(entryAbs), { recursive: true })
+
+	const webImport = resolveCoreWebSpecifier(rootDir)
+	const hasGlobalTsx = existsSync(path.join(rootDir, 'web', 'layouts', 'global.tsx'))
+	const hasGlobalTs = !hasGlobalTsx && existsSync(path.join(rootDir, 'web', 'layouts', 'global.ts'))
+	const globalImportLine =
+		hasGlobalTsx || hasGlobalTs
+			? `import GlobalLayout from '../../web/layouts/global'`
+			: `const GlobalLayout = undefined`
+
+	const cfg = await loadDevProjectConfig(rootDir)
+	const subdomains = cfg?.subdomains && typeof cfg.subdomains === 'object' ? cfg.subdomains : undefined
+
+	const mountOpts = subdomains
+		? `{ routes, layouts, GlobalLayout, subdomains: ${JSON.stringify(subdomains)} }`
+		: `{ routes, layouts, GlobalLayout }`
+
+	const source = [
+		`/* eslint-disable */`,
+		`// AUTO-GENERATED BY @dex/dev. DO NOT EDIT.`,
+		`import { mountApp } from ${JSON.stringify(webImport)}`,
+		`import { routes } from './routes'`,
+		`import { layouts } from './layouts'`,
+		globalImportLine,
+		``,
+		`mountApp(${mountOpts})`,
+		``,
+	].join('\n')
+
+	await writeFile(entryAbs, source, 'utf8')
+}
+
 function stripDevReloadScript(html: string): string {
 	return html.replace(
 		/[ \t]*<script\b[^>]*>[\s\S]*?\/__dev\/reload[\s\S]*?<\/script>[ \t]*\r?\n?/gi,
@@ -325,11 +545,14 @@ export async function dexPrepareBuild({ rootDir }: DexTaskOptions) {
 }
 
 export async function dexBuildClient({ rootDir, defineArgs = [] }: DexTaskOptions) {
+	const paths = resolveProjectPaths(rootDir)
+	await ensureGeneratedClientEntry(rootDir, paths)
+
 	const proc = Bun.spawn(
 		[
 			'bun',
 			'build',
-			'core/bootstrap/web.tsx',
+			paths.clientEntry,
 			'--target', // TODO: Make these configurable?
 			'browser',
 			'--splitting',
@@ -357,63 +580,81 @@ export async function dexBuildClient({ rootDir, defineArgs = [] }: DexTaskOption
 }
 
 export async function dexBuild({ rootDir, defineArgs = [] }: DexTaskOptions) {
+	const paths = resolveProjectPaths(rootDir)
+	const hasPages = existsSync(path.join(rootDir, 'web', 'pages'))
+	const hasWebHtml = existsSync(path.join(rootDir, 'web', 'public', 'index.html'))
+	const hasStyles = existsSync(path.join(rootDir, 'web', 'styles', 'index.css'))
+
 	// 1. Generate routes
-	const genProc = Bun.spawn(
-		[
-			'bunx',
-			'--bun',
-			'dex-router',
-			'generate',
-			'--pagesDir',
-			'web/pages',
-			'--layoutsDir',
-			'web/layouts',
-			'--outRoutesTs',
-			'core/router/.generated/routes.ts',
-			'--outRoutesJson',
-			'core/router/.generated/manifest.json',
-			'--outLayoutsTs',
-			'core/router/.generated/layouts.ts',
-		],
-		{ 
-			cwd: rootDir, 
-			stdout: 'inherit', 
-			stderr: 'inherit', 
-			stdin: 'inherit' 
+	if (paths.isLegacy || hasPages) {
+		const genProc = Bun.spawn(
+			[
+				'bunx',
+				'--bun',
+				'dex-router',
+				'generate',
+				'--pagesDir',
+				'web/pages',
+				'--layoutsDir',
+				'web/layouts',
+				'--outRoutesTs',
+				paths.outRoutesTs,
+				'--outRoutesJson',
+				paths.outRoutesJson,
+				'--outLayoutsTs',
+				paths.outLayoutsTs,
+			],
+			{ 
+				cwd: rootDir, 
+				stdout: 'inherit', 
+				stderr: 'inherit', 
+				stdin: 'inherit' 
+			}
+		)
+		if ((await genProc.exited) !== 0) process.exit(1)
+	}
+
+	if (paths.isLegacy || hasWebHtml) {
+		// 2. Prepare build directory
+		await dexPrepareBuild({ rootDir })
+
+		// 3. Prerender static pages
+		if (paths.isLegacy || hasPages) {
+			await dexPrerender({ rootDir })
 		}
-	)
-	if ((await genProc.exited) !== 0) process.exit(1)
 
-	// 2. Prepare build directory
-	await dexPrepareBuild({ rootDir })
-
-	// 3. Prerender static pages
-	await dexPrerender({ rootDir })
-
-	// 4. Build CSS
-	const cssProc = Bun.spawn(
-		['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'build/assets/styles.css', '--minify'],
-		{ 
-			cwd: rootDir, 
-			stdout: 'inherit', 
-			stderr: 'inherit', 
-			stdin: 'inherit' 
+		// 4. Build CSS
+		if (paths.isLegacy || hasStyles) {
+			const cssProc = Bun.spawn(
+				['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'build/assets/styles.css', '--minify'],
+				{ 
+					cwd: rootDir, 
+					stdout: 'inherit', 
+					stderr: 'inherit', 
+					stdin: 'inherit' 
+				}
+			)
+			if ((await cssProc.exited) !== 0) process.exit(1)
 		}
-	)
-	if ((await cssProc.exited) !== 0) process.exit(1)
 
-	// 5. Build client bundle
-	await dexBuildClient({ rootDir, defineArgs })
+		// 5. Build client bundle
+		await dexBuildClient({ rootDir, defineArgs })
 
-	// 5b. Cache-bust asset references in build/index.html and prerendered HTML files
-	const buildDir = path.join(rootDir, 'build')
-	const clientHash = await computeShortHash(path.join(buildDir, 'assets', 'client.js'))
-	const cssHash = await computeShortHash(path.join(buildDir, 'assets', 'styles.css'))
-	await updateBuildHtmlCacheBusting(buildDir, clientHash, cssHash)
+		// 5b. Cache-bust asset references in build/index.html and prerendered HTML files
+		const buildDir = path.join(rootDir, 'build')
+		const clientHash = await computeShortHash(path.join(buildDir, 'assets', 'client.js'))
+		const cssHash = await computeShortHash(path.join(buildDir, 'assets', 'styles.css'))
+		await updateBuildHtmlCacheBusting(buildDir, clientHash, cssHash)
+	} else {
+		const buildDir = path.join(rootDir, 'build')
+		await rm(buildDir, { recursive: true, force: true })
+		await mkdir(buildDir, { recursive: true })
+	}
 
 	// 6. Build standalone server binary
+	const serverEntry = paths.isLegacy ? paths.serverProdEntry : await ensureGeneratedProdServerEntry(rootDir)
 	const srvProc = Bun.spawn(
-		['bun', 'build', '--compile', 'core/runtime/server/prod.ts', '--outfile', 'build/server'],
+		['bun', 'build', '--compile', serverEntry, '--outfile', 'build/server'],
 		{ 
 			cwd: rootDir, 
 			stdout: 'inherit', 
@@ -425,77 +666,91 @@ export async function dexBuild({ rootDir, defineArgs = [] }: DexTaskOptions) {
 }
 
 export async function dexDev({ rootDir, defineArgs, noWatch }: DexTaskOptions) {
+	const paths = resolveProjectPaths(rootDir)
 	const resolvedDefineArgs = defineArgs && defineArgs.length > 0 ? defineArgs : getPublicEnvDefines(rootDir)
 	const disableWatch = Boolean(noWatch || process.argv.includes('--no-watch') || process.env.DEX_NO_WATCH === '1')
+	const hasPages = existsSync(path.join(rootDir, 'web', 'pages'))
+	const hasWebHtml = existsSync(path.join(rootDir, 'web', 'public', 'index.html'))
+	const hasStyles = existsSync(path.join(rootDir, 'web', 'styles', 'index.css'))
 
 	// Generate routes once before starting watchers (or single-shot build)
-	const proc = Bun.spawn(
-		[
-			'bunx',
-			'--bun',
-			'dex-router',
-			'generate',
-			'--pagesDir',
-			'web/pages',
-			'--layoutsDir',
-			'web/layouts',
-			'--outRoutesTs',
-			'core/router/.generated/routes.ts',
-			'--outRoutesJson',
-			'core/router/.generated/manifest.json',
-			'--outLayoutsTs',
-			'core/router/.generated/layouts.ts',
-		],
-		{
-			cwd: rootDir,
-			stdout: 'inherit',
-			stderr: 'inherit',
-			stdin: 'inherit'
-		}
-	)
-	const code = await proc.exited
-	if (code !== 0) process.exit(code)
-
-	if (disableWatch) {
-		const cssProc = Bun.spawn(
-			['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'web/public/assets/styles.css'],
-			{
-				cwd: rootDir,
-				stdout: 'inherit',
-				stderr: 'inherit',
-				stdin: 'inherit',
-			}
-		)
-		const cssCode = await cssProc.exited
-		if (cssCode !== 0) process.exit(cssCode)
-
-		const clientProc = Bun.spawn(
+	if (paths.isLegacy || hasPages) {
+		const proc = Bun.spawn(
 			[
-				'bun',
-				'build',
-				'core/bootstrap/web.tsx',
-				'--target',
-				'browser',
-				'--splitting',
-				'--format',
-				'esm',
-				'--outdir',
-				'web/public/assets',
-				'--entry-naming',
-				'client.[ext]',
-				...resolvedDefineArgs,
+				'bunx',
+				'--bun',
+				'dex-router',
+				'generate',
+				'--pagesDir',
+				'web/pages',
+				'--layoutsDir',
+				'web/layouts',
+				'--outRoutesTs',
+				paths.outRoutesTs,
+				'--outRoutesJson',
+				paths.outRoutesJson,
+				'--outLayoutsTs',
+				paths.outLayoutsTs,
 			],
 			{
 				cwd: rootDir,
 				stdout: 'inherit',
 				stderr: 'inherit',
-				stdin: 'inherit',
+				stdin: 'inherit'
 			}
 		)
-		const clientCode = await clientProc.exited
-		if (clientCode !== 0) process.exit(clientCode)
+		const code = await proc.exited
+		if (code !== 0) process.exit(code)
+	}
 
-		const srvProc = Bun.spawn(['bun', 'core/runtime/app/index.ts'], {
+	if (paths.isLegacy || hasWebHtml) {
+		await ensureGeneratedClientEntry(rootDir, paths)
+	}
+
+	if (disableWatch) {
+		if (paths.isLegacy || hasStyles) {
+			const cssProc = Bun.spawn(
+				['bun', 'tailwindcss', '-i', 'web/styles/index.css', '-o', 'web/public/assets/styles.css'],
+				{
+					cwd: rootDir,
+					stdout: 'inherit',
+					stderr: 'inherit',
+					stdin: 'inherit',
+				}
+			)
+			const cssCode = await cssProc.exited
+			if (cssCode !== 0) process.exit(cssCode)
+		}
+
+		if (paths.isLegacy || hasWebHtml) {
+			const clientProc = Bun.spawn(
+				[
+					'bun',
+					'build',
+					paths.clientEntry,
+					'--target',
+					'browser',
+					'--splitting',
+					'--format',
+					'esm',
+					'--outdir',
+					'web/public/assets',
+					'--entry-naming',
+					'client.[ext]',
+					...resolvedDefineArgs,
+				],
+				{
+					cwd: rootDir,
+					stdout: 'inherit',
+					stderr: 'inherit',
+					stdin: 'inherit',
+				}
+			)
+			const clientCode = await clientProc.exited
+			if (clientCode !== 0) process.exit(clientCode)
+		}
+
+		const srvProc = Bun.spawn(['bun', paths.serverDevEntry], {
 			cwd: rootDir,
 			stdout: 'inherit',
 			stderr: 'inherit',
@@ -517,8 +772,10 @@ export async function dexDev({ rootDir, defineArgs, noWatch }: DexTaskOptions) {
 		return
 	}
 
-	spawnGroup([
-		{
+	const tasks: Array<{ name: string; cmd: string[] }> = []
+
+	if (paths.isLegacy || hasPages) {
+		tasks.push({
 			name: 'routes:watch',
 			cmd: [
 				'bunx',
@@ -530,14 +787,17 @@ export async function dexDev({ rootDir, defineArgs, noWatch }: DexTaskOptions) {
 				'--layoutsDir',
 				'web/layouts',
 				'--outRoutesTs',
-				'core/router/.generated/routes.ts',
+				paths.outRoutesTs,
 				'--outRoutesJson',
-				'core/router/.generated/manifest.json',
+				paths.outRoutesJson,
 				'--outLayoutsTs',
-				'core/router/.generated/layouts.ts',
+				paths.outLayoutsTs,
 			],
-		},
-		{
+		})
+	}
+
+	if (paths.isLegacy || hasStyles) {
+		tasks.push({
 			name: 'styles:watch',
 			cmd: [
 				'bun',
@@ -548,13 +808,16 @@ export async function dexDev({ rootDir, defineArgs, noWatch }: DexTaskOptions) {
 				'web/public/assets/styles.css',
 				'--watch',
 			],
-		},
-		{
+		})
+	}
+
+	if (paths.isLegacy || hasWebHtml) {
+		tasks.push({
 			name: 'client:watch',
 			cmd: [
 				'bun',
 				'build',
-				'core/bootstrap/web.tsx',
+				paths.clientEntry,
 				'--target',
 				'browser',
 				'--splitting',
@@ -567,12 +830,15 @@ export async function dexDev({ rootDir, defineArgs, noWatch }: DexTaskOptions) {
 				...resolvedDefineArgs,
 				'--watch',
 			],
-		},
-		{
-			name: 'server:dev',
-			cmd: ['bun', '--watch', 'core/runtime/app/index.ts'],
-		},
-	])
+		})
+	}
+
+	tasks.push({
+		name: 'server:dev',
+		cmd: ['bun', '--watch', paths.serverDevEntry],
+	})
+
+	spawnGroup(tasks)
 }
 
 // Prerender logic
@@ -625,16 +891,11 @@ export type DexPrerenderOptions = DexTaskOptions & {
 }
 
 export async function dexPrerender({ rootDir }: DexPrerenderOptions) {
+	const paths = resolveProjectPaths(rootDir)
 	const buildDir = path.join(rootDir, 'build')
 	const ssgDir = path.join(buildDir, '__ssg')
 
-    let configMod: any
-    try {
-        configMod = await import(path.join(rootDir, 'dex.config.ts') + `?t=${Date.now()}`)
-    } catch {
-        configMod = {} 
-    }
-	const cfg: DexConfig = (configMod?.default ?? {}) as DexConfig
+	const cfg: DexConfig = (await loadDevProjectConfig(rootDir)) as DexConfig
 	const appDefault = cfg.renderStrategy ?? 'spa'
 
 	if (appDefault !== 'ssg') {
@@ -652,15 +913,15 @@ export async function dexPrerender({ rootDir }: DexPrerenderOptions) {
 		return
 	}
 
-	const routesMod: any = await import(path.join(rootDir, 'core/router/.generated/routes.ts') + `?t=${Date.now()}`)
-	const layoutsMod: any = await import(path.join(rootDir, 'core/router/.generated/layouts.ts') + `?t=${Date.now()}`)
+	const routesMod: any = await import(pathToFileURL(path.join(rootDir, paths.outRoutesTs)).href + `?t=${Date.now()}`)
+	const layoutsMod: any = await import(pathToFileURL(path.join(rootDir, paths.outLayoutsTs)).href + `?t=${Date.now()}`)
 
 	const routes: any[] = routesMod?.routes ?? []
 	const layouts: Record<string, () => Promise<any>> = layoutsMod?.layouts ?? {}
 
 	let GlobalLayout: any
 	try {
-		const glMod: any = await import(path.join(rootDir, 'web/layouts/global.tsx') + `?t=${Date.now()}`)
+		const glMod: any = await import(pathToFileURL(path.join(rootDir, 'web/layouts/global.tsx')).href + `?t=${Date.now()}`)
 		GlobalLayout = getDefaultExport(glMod)
 	} catch {
 		GlobalLayout = undefined
@@ -675,8 +936,9 @@ export async function dexPrerender({ rootDir }: DexPrerenderOptions) {
 	]
 	for (const candidate of routerCandidates) {
 		try {
-			if (candidate.startsWith('/') && !existsSync(candidate)) continue
-			const modPath: string = candidate
+			const isFsPath = path.isAbsolute(candidate)
+			if (isFsPath && !existsSync(candidate)) continue
+			const modPath: string = isFsPath ? pathToFileURL(candidate).href + `?t=${Date.now()}` : candidate
 			const routerMod: any = await import(modPath)
 			if (routerMod?.RouterContext) {
 				RouterContext = routerMod.RouterContext

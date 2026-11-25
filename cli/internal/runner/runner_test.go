@@ -82,3 +82,48 @@ func TestSpawnGroup(t *testing.T) {
 		}
 	})
 }
+
+func TestCmdBuildAndStart_DexCore(t *testing.T) {
+	tmpBin := t.TempDir()
+	logFile := filepath.Join(tmpBin, "bun-args.log")
+	fakeBun := filepath.Join(tmpBin, "bun")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + logFile + "\"\n"
+	if err := os.WriteFile(fakeBun, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tmpBin)
+
+	projectDir := t.TempDir()
+	coreSrcDir := filepath.Join(projectDir, "packages", "core", "src")
+	if err := os.MkdirAll(coreSrcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coreSrcDir, "build.ts"), []byte("export async function runBuild() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coreSrcDir, "dev.ts"), []byte("export async function runDev() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CmdBuild(projectDir); err != nil {
+		t.Fatalf("CmdBuild failed: %v", err)
+	}
+	out, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "@dex/core/build") || !strings.Contains(string(out), "runBuild()") {
+		t.Fatalf("expected @dex/core/build invocation, got %q", string(out))
+	}
+
+	if err := CmdStart(projectDir, false, 7990); err != nil {
+		t.Fatalf("CmdStart failed: %v", err)
+	}
+	out, err = os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "@dex/core/dev") || !strings.Contains(string(out), "runDev()") {
+		t.Fatalf("expected @dex/core/dev invocation, got %q", string(out))
+	}
+}

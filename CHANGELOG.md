@@ -2,6 +2,19 @@
 
 All notable changes to the Dex framework, packages, templates, and CLI are documented in this file.
 
+## [v0.5.0] - 2026-11-25
+
+### `@dex/core` & Config-as-Composition
+- Added **`@dex/core`** package (`framework/packages/core/`) replacing userland `core/bootstrap/*` and `core/runtime/*` with opt-in composition (API-only, frontend-only, and full-stack) and `DexPlugin` lifecycle hooks (`onGenerate`, `onBeforeBuild`, `onAfterBuild`, `onServer`).
+- Moved framework configuration to **`config/core/`** (flat `index.ts` exporting `router.ts`, `server.ts`, `api.ts`, `build.ts`, with backward compatibility for legacy `dex.config.*`).
+- Moved generated artifacts from `core/router/.generated/*` and `core/api/generated.ts` to **`.dex/generated/`**, removing the userland `core/` folder from `templates/starter` and `templates/spa`.
+- Updated `dexBuild` to statically bundle `config/core/*` and `routes/api/*` into the standalone `build/server` binary.
+
+### Refined Framework & CLI Updates
+- Added **`dex install`** reconciler (Go & TS CLIs): reads `config/core/`, installs only enabled `@dex/*` packages, and scaffolds missing userland starter files without overwriting existing code.
+- Upgraded **`dex sync`** to safe package-only upgrades by default (`--dry-run`, multi-version jump safe, `SHA256SUMS` verification, `--include-template` opt-in).
+- Added `SHA256SUMS` binary verification to **`dex update`** and added **`dex prune`** (symlink-safe cleanup of inactive versions in `~/.dex/versions/`).
+
 ## [v0.4.0] - 2026-11-24
 
 ### Performance & Benchmarking
