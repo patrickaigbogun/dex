@@ -131,6 +131,25 @@
 
 ---
 
+## v0.5.x Patch Improvements
+
+Cleanup of placeholders and gaps found after the `v0.5.0` release.
+
+### Rendering Strategies
+- [ ] Reconcile `RenderStrategy` across `@dex/router`, `@dex/core`, `@dex/dev`, and `@dex/cli` into a single shared type (currently duplicated in 4 places)
+- [ ] Narrow the type to what is actually implemented (`'spa' | 'ssg'`) until the rest ship, and make `dexPrerender` warn on unknown/unimplemented strategies instead of silently skipping
+- [ ] Decide the future of `'dynamic'`: it is a type literal only (just `<ClientOnly>` islands on SSG pages work today) and does **not** cover ISR or PPR
+- [ ] Per-request `'ssr'` (`renderToReadableStream` + `hydrateRoot`) — prerequisite for PPR
+- [ ] `'isr'` — needs a server-side revalidation cache and background regeneration in `@dex/server` (currently only a placeholder `templates/isr/readme.md`)
+- [ ] `'ppr'` — static shell plus streamed dynamic holes (depends on `'ssr'`)
+- [ ] Wire up or remove `PageModule.render` / `LayoutModule.render` in `@dex/router` types (ignored today; only `metadata.renderStrategy` is read)
+
+### CLI Cleanup
+- [ ] Remove the `mpa` mode entirely (it was a hardcoded early CLI test): drop the `spa`/`mpa` prompt in `dex scaffold`, the `dex-template-mpa.tgz` asset name, the `Mode` type, and `mpa` from `dex template list` in both the Go and TS CLIs
+- [ ] Update docs and the `--mode` flag accordingly
+
+---
+
 ## Ongoing
 
 ### Code Quality & Docs
