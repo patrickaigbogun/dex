@@ -4,23 +4,40 @@ title: "Configuration"
 
 # Configuration
 
-Dex works out of the box with sensible defaults. When you need to customize folder paths, rendering strategy, subdomains, Google fonts, dev watch targets, or `@dex/pie` OpenAPI codegen, configure `dex.config.ts`.
+Dex uses **Config-as-Composition**: framework configuration lives in `config/core/` (`core/` is the only subfolder in `config/`), while app-level service configs (`auth.ts`, `db.ts`, `email.ts`, `cache.ts`, `queues.ts`) sit flat inside `config/`. Legacy `dex.config.ts` files at the project root remain supported for backward compatibility.
 
 ## Default Structure
 
-By default, Dex expects this layout:
-
 ```text
 my-app/
+├─ config/
+│  ├─ core/
+│  │  ├─ index.ts      # Exports the composed Dex config
+│  │  ├─ router.ts     # File-based routing paths (enables @dex/router)
+│  │  ├─ server.ts     # Port, subdomains, fonts, trustProxy (enables @dex/server)
+│  │  ├─ api.ts        # Pie OpenAPI spec, prefix, baseUrl (enables @dex/pie)
+│  │  └─ build.ts      # mode (spa/mpa), renderStrategy (spa/ssg) (enables @dex/dev)
+│  └─ (optional app configs: auth.ts, db.ts, email.ts, cache.ts, queues.ts)
 ├─ web/
 │  ├─ pages/           # Route components
 │  ├─ layouts/         # Layout components
 │  ├─ public/          # Static index.html & dev assets
 │  └─ styles/          # Tailwind CSS entrypoint (index.css)
-├─ routes/api/         # Elysia API routes
+├─ routes/api/         # Elysia API routes (optional)
 ├─ lib/api.ts          # Userland @dex/pie client
-└─ core/               # Bootstrap, runtime, and generated files
+└─ .dex/generated/     # Auto-generated routes, layouts, manifest, API types (gitignored)
 ```
+
+After editing `config/core/`, run `dex install` to install only the enabled `@dex/*` packages and scaffold any missing userland directories without overwriting your existing files.
+
+## Rendering Strategies
+
+| Strategy | Status | Behavior |
+| :--- | :--- | :--- |
+| `'spa'` | **Implemented** | Client-side React rendering with ESM code-splitting (`--splitting --format esm`) and `dexSpaFallback`. |
+| `'ssg'` | **Implemented** | Build-time prerendering (`renderToString` with `<RouterContext.Provider>`, `<head>` metadata, and Google Fonts) served before SPA fallback. Supports `<ClientOnly>` islands. |
+| `'ssr'` | *Planned* | Reserved in `RenderStrategy` type; runtime per-request SSR + `hydrateRoot` not yet implemented (use `resolveHead` for dynamic `<head>` tags today). |
+| `'ppr'` / `'isr'` | *Planned* | Reserved in types / roadmap; not yet implemented. |
 
 ## Custom Configuration
 

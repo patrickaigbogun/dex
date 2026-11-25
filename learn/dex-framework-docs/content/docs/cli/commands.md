@@ -10,9 +10,12 @@ The native Go Dex CLI (`dex`) provides sub-5ms commands for scaffolding projects
 
 ```bash
 dex scaffold <dir> [options]
-dex sync [--interactive] [options]
+dex install [--packages <list>] [--no-install]
+dex sync [--dry-run] [--include-template] [--interactive] [options]
+dex deploy <vercel|netlify|cloudflare|railway|render|docker> [--dry-run] [--prod]
 dex template <list|cache|diff> [options]
 dex update [version] [--force]
+dex prune
 dex versions | dex list | dex ls
 dex use <version>
 dex pie generate [spec-url-or-file] [options]
